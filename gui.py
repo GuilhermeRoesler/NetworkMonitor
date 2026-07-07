@@ -7,7 +7,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk
 
-APP_NAME = "Radmin Monitor"
+APP_NAME = "Network Monitor"
 REFRESH_MS = 3000
 
 STATUS_ONLINE = "Online"
@@ -78,8 +78,8 @@ class StatusWindow:
     def _run(self) -> None:
         self._root = tk.Tk()
         self._root.title(APP_NAME)
-        self._root.geometry("560x420")
-        self._root.minsize(480, 320)
+        self._root.geometry("680x460")
+        self._root.minsize(560, 360)
         self._root.configure(bg=COLORS["bg"])
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -133,19 +133,21 @@ class StatusWindow:
         table_frame = ttk.Frame(container)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("name", "ip", "status")
+        columns = ("network", "name", "ip", "status")
         self._tree = ttk.Treeview(
             table_frame,
             columns=columns,
             show="headings",
             selectmode="browse",
         )
+        self._tree.heading("network", text="Rede")
         self._tree.heading("name", text="Nome")
         self._tree.heading("ip", text="IP")
         self._tree.heading("status", text="Status")
-        self._tree.column("name", width=180, anchor=tk.W)
-        self._tree.column("ip", width=140, anchor=tk.W)
-        self._tree.column("status", width=100, anchor=tk.CENTER)
+        self._tree.column("network", width=130, anchor=tk.W)
+        self._tree.column("name", width=160, anchor=tk.W)
+        self._tree.column("ip", width=130, anchor=tk.W)
+        self._tree.column("status", width=90, anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -168,17 +170,23 @@ class StatusWindow:
         if self._root is None or self._tree is None:
             return
 
-        from main import get_radmin_ip, load_config, load_state
+        from main import get_lan_ip, get_radmin_ip, load_config, load_state
 
-        local_ip = get_radmin_ip()
+        radmin_ip = get_radmin_ip()
+        lan_ip = get_lan_ip()
         config = load_config()
         state = load_state()
 
         if self._local_ip_var is not None:
-            if local_ip:
-                self._local_ip_var.set(f"IP local Radmin: {local_ip}")
+            parts = []
+            if radmin_ip:
+                parts.append(f"Radmin: {radmin_ip}")
+            if lan_ip:
+                parts.append(f"LAN: {lan_ip}")
+            if parts:
+                self._local_ip_var.set(" · ".join(parts))
             else:
-                self._local_ip_var.set("Radmin VPN não detectado")
+                self._local_ip_var.set("Nenhuma rede detectada")
 
         for item in self._tree.get_children():
             self._tree.delete(item)
@@ -189,7 +197,12 @@ class StatusWindow:
             label = status_label(online)
             if online is True:
                 online_count += 1
-            self._tree.insert("", tk.END, values=(peer.name, peer.ip, label), tags=(label,))
+            self._tree.insert(
+                "",
+                tk.END,
+                values=(peer.network_name, peer.name, peer.ip, label),
+                tags=(label,),
+            )
 
         total = len(config.peers)
         if self._summary_var is not None:

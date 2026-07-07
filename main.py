@@ -29,7 +29,7 @@ except ImportError:
     print("Dependência ausente. Execute: pip install -r requirements.txt")
     sys.exit(1)
 
-APP_NAME = "Radmin Monitor"
+APP_NAME = "Network Monitor"
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "peers.json"
 STATE_PATH = APP_DIR / "state.json"
@@ -43,13 +43,30 @@ RADMIN_REG_PATHS = (
 )
 
 RADMIN_GATEWAYS = {"26.0.0.1"}
+LAN_SKIP_PREFIXES = ("169.254.",)  # APIPA / link-local
+PRIVATE_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
 
 
 @dataclass
 class Peer:
     ip: str
     name: str
+    network_name: str = ""
+    network_type: str = "radmin"
     online: bool | None = None
+
+
+@dataclass
+class NetworkConfig:
+    name: str
+    network_type: str
+    enabled: bool = True
+    auto_discover: bool | None = None
+    peers: list[Peer] = field(default_factory=list)
 
 
 @dataclass
@@ -57,7 +74,15 @@ class MonitorConfig:
     interval_seconds: int = 15
     auto_discover: bool = True
     scan_interval_seconds: int = 300
-    peers: list[Peer] = field(default_factory=list)
+    networks: list[NetworkConfig] = field(default_factory=list)
+
+    @property
+    def peers(self) -> list[Peer]:
+        result: list[Peer] = []
+        for network in self.networks:
+            if network.enabled:
+                result.extend(network.peers)
+        return result
 
 
 def setup_logging() -> None:
@@ -117,6 +142,71 @@ def get_radmin_ip() -> str | None:
     return None
 
 
+def is_private_ip(ip: str) -> bool:
+    try:
+        address = ipaddress.IPv4Address(ip)
+    except ipaddress.AddressValueError:
+        return False
+    return any(address in network for network in PRIVATE_NETWORKS)
+
+
+def is_radmin_ip(ip: str) -> bool:
+    return ip.startswith("26.")
+
+
+def get_lan_ip() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            candidate = sock.getsockname()[0]
+            if is_private_ip(candidate) and not is_radmin_ip(candidate):
+                return candidate
+    except OSError:
+        pass
+
+    try:
+        result = subprocess.run(
+            ["ipconfig"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        current_adapter = ""
+        for line in result.stdout.splitlines():
+            if line and not line.startswith(" "):
+                current_adapter = line.strip().rstrip(":")
+                continue
+
+            adapter_lower = current_adapter.lower()
+            if any(
+                skip in adapter_lower
+                for skip in ("radmin", "loopback", "virtual", "vethernet", "vmware", "hyper-v")
+            ):
+                continue
+
+            match = re.search(r"IPv4[^:]*:\s*([\d.]+)", line)
+            if not match:
+                continue
+
+            candidate = match.group(1)
+            if candidate.startswith(LAN_SKIP_PREFIXES):
+                continue
+            if is_private_ip(candidate) and not is_radmin_ip(candidate):
+                return candidate
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+    return None
+
+
+def get_local_ip(network_type: str) -> str | None:
+    if network_type == "lan":
+        return get_lan_ip()
+    return get_radmin_ip()
+
+
 def load_config() -> MonitorConfig:
     if not CONFIG_PATH.exists():
         save_default_config()
@@ -124,20 +214,44 @@ def load_config() -> MonitorConfig:
     with CONFIG_PATH.open(encoding="utf-8") as handle:
         raw = json.load(handle)
 
-    peers: list[Peer] = []
+    global_auto_discover = bool(raw.get("auto_discover", True))
+    networks: list[NetworkConfig] = []
+
     for network in raw.get("networks", []):
-        if not network.get("enabled", True):
-            continue
+        network_type = network.get("type", "radmin")
+        network_name = network.get("name", "Rede")
+        auto_discover = network.get("auto_discover")
+        if auto_discover is None:
+            auto_discover = global_auto_discover
+
+        peers: list[Peer] = []
         for peer in network.get("peers", []):
             ip = peer.get("ip", "").strip()
             if ip:
-                peers.append(Peer(ip=ip, name=peer.get("name", ip)))
+                peers.append(
+                    Peer(
+                        ip=ip,
+                        name=peer.get("name", ip),
+                        network_name=network_name,
+                        network_type=network_type,
+                    )
+                )
+
+        networks.append(
+            NetworkConfig(
+                name=network_name,
+                network_type=network_type,
+                enabled=bool(network.get("enabled", True)),
+                auto_discover=bool(auto_discover),
+                peers=peers,
+            )
+        )
 
     return MonitorConfig(
         interval_seconds=int(raw.get("interval_seconds", 15)),
-        auto_discover=bool(raw.get("auto_discover", True)),
+        auto_discover=global_auto_discover,
         scan_interval_seconds=int(raw.get("scan_interval_seconds", 300)),
-        peers=peers,
+        networks=networks,
     )
 
 
@@ -148,10 +262,19 @@ def save_default_config() -> None:
         "scan_interval_seconds": 300,
         "networks": [
             {
-                "name": "Minha Rede Radmin",
+                "name": "Radmin VPN",
+                "type": "radmin",
                 "enabled": True,
+                "auto_discover": True,
                 "peers": [],
-            }
+            },
+            {
+                "name": "Rede Local (LAN)",
+                "type": "lan",
+                "enabled": True,
+                "auto_discover": True,
+                "peers": [],
+            },
         ],
     }
     CONFIG_PATH.write_text(json.dumps(default, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -214,12 +337,18 @@ def subnet_for_ip(ip: str) -> ipaddress.IPv4Network:
     return ipaddress.IPv4Network(f"{address}/24", strict=False)
 
 
-def discover_peers(local_ip: str, known_ips: set[str]) -> list[Peer]:
+def discover_peers(
+    local_ip: str,
+    known_ips: set[str],
+    *,
+    skip_ips: set[str] | None = None,
+) -> list[Peer]:
     network = subnet_for_ip(local_ip)
+    excluded = known_ips | {local_ip} | (skip_ips or set())
     candidates = [
         str(host)
         for host in network.hosts()
-        if str(host) != local_ip and str(host) not in RADMIN_GATEWAYS
+        if str(host) not in excluded
     ]
 
     discovered: list[Peer] = []
@@ -237,15 +366,7 @@ def discover_peers(local_ip: str, known_ips: set[str]) -> list[Peer]:
     return discovered
 
 
-def merge_peers(config_peers: list[Peer], discovered: list[Peer]) -> list[Peer]:
-    by_ip = {peer.ip: peer for peer in config_peers}
-    for peer in discovered:
-        if peer.ip not in by_ip:
-            by_ip[peer.ip] = peer
-    return list(by_ip.values())
-
-
-def persist_discovered_peers(discovered: list[Peer]) -> None:
+def persist_discovered_peers(network_name: str, discovered: list[Peer]) -> None:
     if not discovered:
         return
 
@@ -253,10 +374,10 @@ def persist_discovered_peers(discovered: list[Peer]) -> None:
         raw = json.load(handle)
 
     networks = raw.setdefault("networks", [])
-    if not networks:
-        networks.append({"name": "Minha Rede Radmin", "enabled": True, "peers": []})
+    target = next((n for n in networks if n.get("name") == network_name), None)
+    if target is None:
+        return
 
-    target = networks[0]
     existing_ips = {p.get("ip") for p in target.setdefault("peers", [])}
 
     for peer in discovered:
@@ -299,8 +420,8 @@ def check_peers(peers: list[Peer], previous: dict[str, bool]) -> dict[str, bool]
 
             status = "ficou online" if online else "ficou offline"
             notify(
-                title=f"{peer.name} {status}",
-                message=f"IP Radmin: {peer.ip}",
+                title=f"[{peer.network_name}] {peer.name} {status}",
+                message=f"IP: {peer.ip}",
             )
 
     return current
@@ -381,17 +502,24 @@ def create_tray_icon_image() -> Image.Image:
 
 
 def build_status_message() -> str:
-    local_ip = get_radmin_ip()
     config = load_config()
     state = load_state()
 
-    if not local_ip:
-        return "Radmin VPN não detectado."
+    radmin_ip = get_radmin_ip()
+    lan_ip = get_lan_ip()
+
+    lines = []
+    if radmin_ip:
+        lines.append(f"Radmin: {radmin_ip}")
+    if lan_ip:
+        lines.append(f"LAN: {lan_ip}")
+    if not lines:
+        return "Nenhuma rede detectada."
 
     if not config.peers:
-        return f"IP local: {local_ip}\nNenhum peer configurado."
+        lines.append("Nenhum peer configurado.")
+        return "\n".join(lines)
 
-    lines = [f"IP local: {local_ip}"]
     for peer in config.peers:
         online = state.get(peer.ip)
         if online is True:
@@ -400,9 +528,74 @@ def build_status_message() -> str:
             status = "offline"
         else:
             status = "?"
-        lines.append(f"{peer.name}: {status}")
+        lines.append(f"[{peer.network_name}] {peer.name}: {status}")
 
     return "\n".join(lines)
+
+
+def skip_ips_for_network(network_type: str, local_ip: str) -> set[str]:
+    skipped = {local_ip}
+    if network_type == "radmin":
+        skipped |= RADMIN_GATEWAYS
+    else:
+        network = subnet_for_ip(local_ip)
+        skipped.add(str(network.network_address + 1))
+    return skipped
+
+
+def process_network(
+    network: NetworkConfig,
+    config: MonitorConfig,
+    known_global_ips: set[str],
+    last_scan: float,
+    now: float,
+) -> tuple[list[Peer], float, bool]:
+    """Retorna peers atualizados, novo last_scan e se houve mudança na config."""
+    if not network.enabled:
+        return [], last_scan, False
+
+    local_ip = get_local_ip(network.network_type)
+    if not local_ip:
+        logging.warning("Rede '%s' (%s) não detectada.", network.name, network.network_type)
+        return [], last_scan, False
+
+    peers = list(network.peers)
+    known_ips = known_global_ips | {local_ip}
+    config_changed = False
+
+    if network.auto_discover and (now - last_scan) >= config.scan_interval_seconds:
+        discovered = discover_peers(
+            local_ip,
+            known_ips,
+            skip_ips=skip_ips_for_network(network.network_type, local_ip),
+        )
+        for peer in discovered:
+            peer.network_name = network.name
+            peer.network_type = network.network_type
+        if discovered:
+            persist_discovered_peers(network.name, discovered)
+            config_changed = True
+        last_scan = now
+
+    if not peers and network.auto_discover:
+        logging.info(
+            "Rede '%s' sem peers. Escaneando %s...",
+            network.name,
+            subnet_for_ip(local_ip),
+        )
+        discovered = discover_peers(
+            local_ip,
+            known_ips,
+            skip_ips=skip_ips_for_network(network.network_type, local_ip),
+        )
+        for peer in discovered:
+            peer.network_name = network.name
+            peer.network_type = network.network_type
+        if discovered:
+            persist_discovered_peers(network.name, discovered)
+            config_changed = True
+
+    return peers, last_scan, config_changed
 
 
 def run_monitor_loop(stop_event: threading.Event) -> None:
@@ -410,56 +603,55 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
 
     config = load_config()
     state = load_state()
-    last_scan = 0.0
+    last_scans: dict[str, float] = {}
 
     while not stop_event.is_set():
-        local_ip = get_radmin_ip()
-        if not local_ip:
-            logging.warning("Radmin VPN não detectado. Aguardando...")
+        now = time.time()
+        all_peers: list[Peer] = []
+        known_global_ips: set[str] = set()
+        config_changed = False
+
+        local_ips = [ip for ip in (get_radmin_ip(), get_lan_ip()) if ip]
+        known_global_ips.update(local_ips)
+
+        for network in config.networks:
+            last_scan = last_scans.get(network.name, 0.0)
+            peers, new_last_scan, changed = process_network(
+                network, config, known_global_ips, last_scan, now
+            )
+            last_scans[network.name] = new_last_scan
+            if changed:
+                config_changed = True
+            for peer in peers:
+                known_global_ips.add(peer.ip)
+            all_peers.extend(peers)
+
+        if config_changed:
+            config = load_config()
+            all_peers = config.peers
+
+        if not all_peers:
+            active = [n.name for n in config.networks if n.enabled]
+            if not active:
+                logging.warning("Nenhuma rede habilitada em peers.json.")
+            elif not local_ips:
+                logging.warning("Nenhuma rede detectada (Radmin/LAN). Aguardando...")
+            else:
+                logging.info("Nenhum peer configurado ou encontrado. Próxima verificação em %ss.", config.interval_seconds)
             if stop_event.wait(config.interval_seconds):
                 break
             continue
 
-        peers = list(config.peers)
-        known_ips = {peer.ip for peer in peers} | {local_ip}
-
-        now = time.time()
-        if config.auto_discover and (now - last_scan) >= config.scan_interval_seconds:
-            discovered = discover_peers(local_ip, known_ips)
-            if discovered:
-                persist_discovered_peers(discovered)
-                config = load_config()
-                peers = list(config.peers)
-            last_scan = now
-
-        if not peers:
-            logging.info(
-                "Nenhum peer configurado. Escaneando sub-rede %s...",
-                subnet_for_ip(local_ip),
-            )
-            discovered = discover_peers(local_ip, known_ips)
-            if discovered:
-                persist_discovered_peers(discovered)
-                config = load_config()
-                peers = list(config.peers)
-            else:
-                logging.info(
-                    "Nenhum peer online na sub-rede. Próxima verificação em %ss.",
-                    config.interval_seconds,
-                )
-                if stop_event.wait(config.interval_seconds):
-                    break
-                continue
-
-        state = check_peers(peers, state)
+        state = check_peers(all_peers, state)
         save_state(state)
 
-        online_count = sum(1 for value in state.values() if value)
+        online_count = sum(1 for peer in all_peers if state.get(peer.ip))
         logging.info(
-            "Verificação concluída: %d/%d online (IP local: %s)",
+            "Verificação concluída: %d/%d online (Radmin: %s · LAN: %s)",
             online_count,
-            len(peers),
-            local_ip,
+            len(all_peers),
+            get_radmin_ip() or "—",
+            get_lan_ip() or "—",
         )
         if stop_event.wait(config.interval_seconds):
             break
@@ -509,45 +701,85 @@ def run_with_tray() -> None:
     monitor_thread.join(timeout=5)
 
 
-def scan_once() -> None:
+def scan_network(network_type: str) -> bool:
     setup_logging()
-    local_ip = get_radmin_ip()
-    if not local_ip:
-        print("Radmin VPN não encontrado. Verifique se está instalado e conectado.")
-        sys.exit(1)
+    local_ip = get_local_ip(network_type)
+    label = "Radmin VPN" if network_type == "radmin" else "LAN"
 
-    print(f"IP Radmin local: {local_ip}")
+    if not local_ip:
+        print(f"{label} não encontrada. Verifique a conexão.")
+        return False
+
+    print(f"IP local ({label}): {local_ip}")
     print(f"Escaneando sub-rede {subnet_for_ip(local_ip)}...")
+
     config = load_config()
+    network = next(
+        (n for n in config.networks if n.network_type == network_type and n.enabled),
+        None,
+    )
+    if network is None:
+        print(f"Nenhuma rede do tipo '{network_type}' habilitada em peers.json.")
+        return False
+
     known_ips = {peer.ip for peer in config.peers} | {local_ip}
-    discovered = discover_peers(local_ip, known_ips)
+    discovered = discover_peers(
+        local_ip,
+        known_ips,
+        skip_ips=skip_ips_for_network(network_type, local_ip),
+    )
+    for peer in discovered:
+        peer.network_name = network.name
+        peer.network_type = network_type
 
     if discovered:
-        persist_discovered_peers(discovered)
-        print(f"\n{len(discovered)} peer(s) encontrado(s) e salvos em peers.json:")
+        persist_discovered_peers(network.name, discovered)
+        print(f"\n{len(discovered)} peer(s) encontrado(s) em '{network.name}':")
         for peer in discovered:
             print(f"  - {peer.name} ({peer.ip})")
     else:
-        print("\nNenhum peer online encontrado na sub-rede.")
+        print(f"\nNenhum peer online encontrado na sub-rede {label}.")
+    return True
+
+
+def scan_once() -> None:
+    if not scan_network("radmin"):
+        sys.exit(1)
+
+
+def scan_lan() -> None:
+    if not scan_network("lan"):
+        sys.exit(1)
+
+
+def scan_all() -> None:
+    scan_network("radmin")
+    print()
+    scan_network("lan")
 
 
 def show_status() -> None:
-    local_ip = get_radmin_ip()
+    radmin_ip = get_radmin_ip()
+    lan_ip = get_lan_ip()
     config = load_config()
     state = load_state()
 
-    print(f"IP Radmin local: {local_ip or 'não detectado'}")
+    print(f"IP Radmin: {radmin_ip or 'não detectado'}")
+    print(f"IP LAN:    {lan_ip or 'não detectado'}")
     print(f"Peers configurados: {len(config.peers)}")
     print(f"Intervalo de verificação: {config.interval_seconds}s")
-    print(f"Auto-descoberta: {'sim' if config.auto_discover else 'não'}")
+    print(f"Auto-descoberta global: {'sim' if config.auto_discover else 'não'}")
     print()
 
     if not config.peers:
-        print("Nenhum peer em peers.json. Use --scan para descobrir.")
+        print("Nenhum peer em peers.json. Use --scan, --scan-lan ou --scan-all.")
         return
 
-    print("Estado atual:")
+    current_network = ""
     for peer in config.peers:
+        if peer.network_name != current_network:
+            current_network = peer.network_name
+            print(f"[{current_network}]")
         online = state.get(peer.ip)
         if online is True:
             status = "online"
@@ -564,6 +796,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--install", action="store_true", help="Registra na inicialização do Windows")
     parser.add_argument("--uninstall", action="store_true", help="Remove da inicialização do Windows")
     parser.add_argument("--scan", action="store_true", help="Escaneia a sub-rede Radmin uma vez")
+    parser.add_argument("--scan-lan", action="store_true", help="Escaneia a sub-rede LAN uma vez")
+    parser.add_argument("--scan-all", action="store_true", help="Escaneia Radmin e LAN")
     parser.add_argument("--status", action="store_true", help="Mostra status atual")
     parser.add_argument("--gui", action="store_true", help="Abre apenas o painel gráfico")
     return parser
@@ -583,6 +817,14 @@ def main() -> None:
 
     if args.scan:
         scan_once()
+        return
+
+    if args.scan_lan:
+        scan_lan()
+        return
+
+    if args.scan_all:
+        scan_all()
         return
 
     if args.status:
