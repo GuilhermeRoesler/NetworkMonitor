@@ -468,6 +468,8 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
 
 
 def run_with_tray() -> None:
+    from gui import status_window
+
     setup_logging()
     stop_event = threading.Event()
 
@@ -479,12 +481,13 @@ def run_with_tray() -> None:
     )
     monitor_thread.start()
 
-    def show_status(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        notify("Status do monitor", build_status_message())
+    def open_panel(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        status_window.show()
 
     def quit_app(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         logging.info("Encerrando pelo menu da bandeja...")
         stop_event.set()
+        status_window.close()
         icon.stop()
 
     icon = pystray.Icon(
@@ -492,7 +495,7 @@ def run_with_tray() -> None:
         create_tray_icon_image(),
         APP_NAME,
         menu=pystray.Menu(
-            pystray.MenuItem("Status", show_status),
+            pystray.MenuItem("Abrir painel", open_panel, default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Encerrar", quit_app),
         ),
@@ -502,6 +505,7 @@ def run_with_tray() -> None:
     icon.run()
 
     stop_event.set()
+    status_window.close()
     monitor_thread.join(timeout=5)
 
 
@@ -561,6 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--uninstall", action="store_true", help="Remove da inicialização do Windows")
     parser.add_argument("--scan", action="store_true", help="Escaneia a sub-rede Radmin uma vez")
     parser.add_argument("--status", action="store_true", help="Mostra status atual")
+    parser.add_argument("--gui", action="store_true", help="Abre apenas o painel gráfico")
     return parser
 
 
@@ -582,6 +587,25 @@ def main() -> None:
 
     if args.status:
         show_status()
+        return
+
+    if args.gui:
+        from gui import status_window
+
+        setup_logging()
+        stop_event = threading.Event()
+        monitor_thread = threading.Thread(
+            target=run_monitor_loop,
+            args=(stop_event,),
+            daemon=True,
+            name="radmin-monitor",
+        )
+        monitor_thread.start()
+        status_window.show()
+        if status_window._thread:
+            status_window._thread.join()
+        stop_event.set()
+        monitor_thread.join(timeout=5)
         return
 
     run_with_tray()
