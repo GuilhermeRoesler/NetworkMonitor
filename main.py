@@ -389,6 +389,32 @@ def persist_discovered_peers(network_name: str, discovered: list[Peer]) -> None:
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def update_peer_name(ip: str, new_name: str) -> bool:
+    new_name = new_name.strip()
+    if not new_name:
+        return False
+
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    found = False
+    for network in raw.get("networks", []):
+        for peer in network.get("peers", []):
+            if peer.get("ip") == ip:
+                peer["name"] = new_name
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        return False
+
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    logging.info("Peer renomeado: %s -> %s", ip, new_name)
+    return True
+
+
 def notify(title: str, message: str) -> None:
     toast = Notification(
         app_id=APP_NAME,

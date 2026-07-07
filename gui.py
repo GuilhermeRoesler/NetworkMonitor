@@ -43,6 +43,10 @@ class StatusWindow:
         self._local_ip_var: tk.StringVar | None = None
         self._updated_var: tk.StringVar | None = None
         self._refresh_job: str | None = None
+        self._edit_entry: ttk.Entry | None = None
+        self._editing_ip: str | None = None
+        self._editing_item: str | None = None
+        self._context_menu: tk.Menu | None = None
         self._lock = threading.Lock()
 
     @property
@@ -69,6 +73,7 @@ class StatusWindow:
         self._root.focus_force()
 
     def _destroy(self) -> None:
+        self._cancel_rename()
         if self._refresh_job and self._root is not None:
             self._root.after_cancel(self._refresh_job)
         if self._root is not None:
@@ -78,8 +83,8 @@ class StatusWindow:
     def _run(self) -> None:
         self._root = tk.Tk()
         self._root.title(APP_NAME)
-        self._root.geometry("680x460")
-        self._root.minsize(560, 360)
+        self._root.geometry("560x460")
+        self._root.minsize(480, 360)
         self._root.configure(bg=COLORS["bg"])
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -88,6 +93,7 @@ class StatusWindow:
         self._root.mainloop()
 
     def _on_close(self) -> None:
+        self._cancel_rename()
         if self._refresh_job and self._root is not None:
             self._root.after_cancel(self._refresh_job)
         if self._root is not None:
@@ -133,21 +139,19 @@ class StatusWindow:
         table_frame = ttk.Frame(container)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("network", "name", "ip", "status")
+        columns = ("name", "ip", "status")
         self._tree = ttk.Treeview(
             table_frame,
             columns=columns,
             show="headings",
             selectmode="browse",
         )
-        self._tree.heading("network", text="Rede")
         self._tree.heading("name", text="Nome")
         self._tree.heading("ip", text="IP")
         self._tree.heading("status", text="Status")
-        self._tree.column("network", width=130, anchor=tk.W)
-        self._tree.column("name", width=160, anchor=tk.W)
-        self._tree.column("ip", width=130, anchor=tk.W)
-        self._tree.column("status", width=90, anchor=tk.CENTER)
+        self._tree.column("name", width=200, anchor=tk.W)
+        self._tree.column("ip", width=150, anchor=tk.W)
+        self._tree.column("status", width=100, anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -159,15 +163,108 @@ class StatusWindow:
         self._tree.tag_configure(STATUS_OFFLINE, foreground=COLORS[STATUS_OFFLINE])
         self._tree.tag_configure(STATUS_UNKNOWN, foreground=COLORS[STATUS_UNKNOWN])
 
+        self._tree.bind("<Double-1>", self._on_double_click)
+        self._tree.bind("<Button-3>", self._on_right_click)
+        self._tree.bind("<F2>", self._on_f2)
+
+        self._context_menu = tk.Menu(self._root, tearoff=0)
+        self._context_menu.add_command(label="Renomear", command=self._rename_selected)
+
         footer = ttk.Label(
             container,
-            text="A janela pode ser fechada — o monitor continua na bandeja.",
+            text="Duplo clique ou F2 no nome para renomear · A janela pode ser fechada — o monitor continua na bandeja.",
             style="Muted.TLabel",
         )
         footer.pack(anchor=tk.W, pady=(12, 0))
 
+    def _on_double_click(self, event: tk.Event) -> None:
+        if self._tree is None:
+            return
+        if self._tree.identify_region(event.x, event.y) != "cell":
+            return
+        if self._tree.identify_column(event.x) != "#1":
+            return
+        item = self._tree.identify_row(event.y)
+        if item:
+            self._start_rename(item)
+
+    def _on_right_click(self, event: tk.Event) -> None:
+        if self._tree is None or self._context_menu is None:
+            return
+        item = self._tree.identify_row(event.y)
+        if item:
+            self._tree.selection_set(item)
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _on_f2(self, _event: tk.Event) -> None:
+        self._rename_selected()
+
+    def _rename_selected(self) -> None:
+        if self._tree is None:
+            return
+        selection = self._tree.selection()
+        if selection:
+            self._start_rename(selection[0])
+
+    def _start_rename(self, item: str) -> None:
+        if self._tree is None or self._root is None:
+            return
+
+        self._cancel_rename()
+
+        bbox = self._tree.bbox(item, column="name")
+        if not bbox:
+            return
+
+        x, y, width, height = bbox
+        current_name = self._tree.set(item, "name")
+        ip = self._tree.set(item, "ip")
+
+        self._editing_item = item
+        self._editing_ip = ip
+        self._edit_entry = ttk.Entry(self._tree)
+        self._edit_entry.place(x=x, y=y, width=width, height=height)
+        self._edit_entry.insert(0, current_name)
+        self._edit_entry.select_range(0, tk.END)
+        self._edit_entry.focus()
+
+        self._edit_entry.bind("<Return>", lambda _e: self._commit_rename())
+        self._edit_entry.bind("<Escape>", lambda _e: self._cancel_rename())
+        self._edit_entry.bind("<FocusOut>", lambda _e: self._root.after_idle(self._commit_rename))
+
+    def _commit_rename(self) -> None:
+        if self._edit_entry is None or self._editing_item is None or self._editing_ip is None:
+            return
+        if not self._edit_entry.winfo_exists():
+            return
+
+        new_name = self._edit_entry.get().strip()
+        old_name = self._tree.set(self._editing_item, "name") if self._tree else ""
+
+        if new_name and new_name != old_name:
+            from main import update_peer_name
+
+            if update_peer_name(self._editing_ip, new_name) and self._tree is not None:
+                self._tree.set(self._editing_item, "name", new_name)
+
+        self._cancel_rename()
+
+    def _cancel_rename(self) -> None:
+        if self._edit_entry is not None:
+            try:
+                self._edit_entry.destroy()
+            except tk.TclError:
+                pass
+            self._edit_entry = None
+        self._editing_item = None
+        self._editing_ip = None
+
     def _refresh_data(self) -> None:
         if self._root is None or self._tree is None:
+            return
+
+        if self._edit_entry is not None:
+            self._schedule_refresh()
             return
 
         from main import get_lan_ip, get_radmin_ip, load_config, load_state
@@ -188,21 +285,34 @@ class StatusWindow:
             else:
                 self._local_ip_var.set("Nenhuma rede detectada")
 
+        selected_ip = None
+        selection = self._tree.selection()
+        if selection:
+            selected_ip = self._tree.set(selection[0], "ip")
+
         for item in self._tree.get_children():
             self._tree.delete(item)
 
         online_count = 0
+        restore_selection = None
         for peer in config.peers:
             online = state.get(peer.ip)
             label = status_label(online)
             if online is True:
                 online_count += 1
-            self._tree.insert(
+            item_id = self._tree.insert(
                 "",
                 tk.END,
-                values=(peer.network_name, peer.name, peer.ip, label),
+                iid=peer.ip,
+                values=(peer.name, peer.ip, label),
                 tags=(label,),
             )
+            if peer.ip == selected_ip:
+                restore_selection = item_id
+
+        if restore_selection:
+            self._tree.selection_set(restore_selection)
+            self._tree.focus(restore_selection)
 
         total = len(config.peers)
         if self._summary_var is not None:
