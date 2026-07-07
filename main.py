@@ -459,6 +459,25 @@ def get_pythonw() -> str:
     return str(pythonw if pythonw.exists() else exe)
 
 
+def startup_vbs_path() -> Path:
+    return (
+        Path(os.environ["APPDATA"])
+        / "Microsoft"
+        / "Windows"
+        / "Start Menu"
+        / "Programs"
+        / "Startup"
+        / "RadminMonitor.vbs"
+    )
+
+
+def remove_startup_vbs() -> None:
+    vbs_path = startup_vbs_path()
+    if vbs_path.exists():
+        vbs_path.unlink()
+        logging.info("Startup VBS removido: %s", vbs_path)
+
+
 def install_startup() -> None:
     main_script = APP_DIR / "main.py"
     command = f'"{get_pythonw()}" "{main_script}" --run'
@@ -471,23 +490,12 @@ def install_startup() -> None:
     ) as key:
         winreg.SetValueEx(key, STARTUP_VALUE, 0, winreg.REG_SZ, command)
 
-    startup_folder = (
-        Path(os.environ["APPDATA"])
-        / "Microsoft"
-        / "Windows"
-        / "Start Menu"
-        / "Programs"
-        / "Startup"
-    )
-    vbs_path = startup_folder / "RadminMonitor.vbs"
-    vbs_content = (
-        f'Set shell = CreateObject("WScript.Shell")\n'
-        f'shell.Run "{command}", 0, False\n'
-    )
-    vbs_path.write_text(vbs_content, encoding="utf-8")
+    # Remove VBS legado — pythonw.exe já roda sem janela; dois startups abriam o app em duplicata.
+    remove_startup_vbs()
 
-    print(f"Iniciado com Windows: registro + {vbs_path}")
+    print("Registrado na inicialização do Windows (registro Run).")
     print(f"Comando: {command}")
+    print("Startup VBS removido (se existia) para evitar execução duplicada.")
 
 
 def uninstall_startup() -> None:
@@ -502,17 +510,7 @@ def uninstall_startup() -> None:
     except OSError:
         pass
 
-    vbs_path = (
-        Path(os.environ["APPDATA"])
-        / "Microsoft"
-        / "Windows"
-        / "Start Menu"
-        / "Programs"
-        / "Startup"
-        / "RadminMonitor.vbs"
-    )
-    if vbs_path.exists():
-        vbs_path.unlink()
+    remove_startup_vbs()
 
     print("Removido da inicialização do Windows.")
 
