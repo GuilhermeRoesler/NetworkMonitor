@@ -14,6 +14,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 import winreg
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
+    from PIL import Image, ImageDraw
+    import pystray
     from winotify import Notification, audio
 except ImportError:
     print("Dependência ausente. Execute: pip install -r requirements.txt")
@@ -58,13 +61,16 @@ class MonitorConfig:
 
 
 def setup_logging() -> None:
+    handlers: list[logging.Handler] = [
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+    ]
+    if sys.stdout is not None and hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+        handlers.append(logging.StreamHandler(sys.stdout))
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_PATH, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=handlers,
     )
 
 
@@ -364,19 +370,54 @@ def uninstall_startup() -> None:
     print("Removido da inicialização do Windows.")
 
 
-def run_monitor() -> None:
-    setup_logging()
+def create_tray_icon_image() -> Image.Image:
+    size = 64
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((6, 6, size - 6, size - 6), fill=(0, 120, 215, 255))
+    draw.ellipse((18, 18, size - 18, size - 18), fill=(255, 255, 255, 255))
+    draw.ellipse((26, 26, size - 26, size - 26), fill=(0, 120, 215, 255))
+    return image
+
+
+def build_status_message() -> str:
+    local_ip = get_radmin_ip()
+    config = load_config()
+    state = load_state()
+
+    if not local_ip:
+        return "Radmin VPN não detectado."
+
+    if not config.peers:
+        return f"IP local: {local_ip}\nNenhum peer configurado."
+
+    lines = [f"IP local: {local_ip}"]
+    for peer in config.peers:
+        online = state.get(peer.ip)
+        if online is True:
+            status = "online"
+        elif online is False:
+            status = "offline"
+        else:
+            status = "?"
+        lines.append(f"{peer.name}: {status}")
+
+    return "\n".join(lines)
+
+
+def run_monitor_loop(stop_event: threading.Event) -> None:
     logging.info("Iniciando %s", APP_NAME)
 
     config = load_config()
     state = load_state()
     last_scan = 0.0
 
-    while True:
+    while not stop_event.is_set():
         local_ip = get_radmin_ip()
         if not local_ip:
             logging.warning("Radmin VPN não detectado. Aguardando...")
-            time.sleep(config.interval_seconds)
+            if stop_event.wait(config.interval_seconds):
+                break
             continue
 
         peers = list(config.peers)
@@ -402,8 +443,12 @@ def run_monitor() -> None:
                 config = load_config()
                 peers = list(config.peers)
             else:
-                logging.info("Nenhum peer online na sub-rede. Próxima verificação em %ss.", config.interval_seconds)
-                time.sleep(config.interval_seconds)
+                logging.info(
+                    "Nenhum peer online na sub-rede. Próxima verificação em %ss.",
+                    config.interval_seconds,
+                )
+                if stop_event.wait(config.interval_seconds):
+                    break
                 continue
 
         state = check_peers(peers, state)
@@ -416,7 +461,48 @@ def run_monitor() -> None:
             len(peers),
             local_ip,
         )
-        time.sleep(config.interval_seconds)
+        if stop_event.wait(config.interval_seconds):
+            break
+
+    logging.info("Monitor encerrado.")
+
+
+def run_with_tray() -> None:
+    setup_logging()
+    stop_event = threading.Event()
+
+    monitor_thread = threading.Thread(
+        target=run_monitor_loop,
+        args=(stop_event,),
+        daemon=True,
+        name="radmin-monitor",
+    )
+    monitor_thread.start()
+
+    def show_status(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        notify("Status do monitor", build_status_message())
+
+    def quit_app(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        logging.info("Encerrando pelo menu da bandeja...")
+        stop_event.set()
+        icon.stop()
+
+    icon = pystray.Icon(
+        APP_NAME,
+        create_tray_icon_image(),
+        APP_NAME,
+        menu=pystray.Menu(
+            pystray.MenuItem("Status", show_status),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Encerrar", quit_app),
+        ),
+    )
+
+    logging.info("Ícone da bandeja ativo.")
+    icon.run()
+
+    stop_event.set()
+    monitor_thread.join(timeout=5)
 
 
 def scan_once() -> None:
@@ -498,7 +584,7 @@ def main() -> None:
         show_status()
         return
 
-    run_monitor()
+    run_with_tray()
 
 
 if __name__ == "__main__":
