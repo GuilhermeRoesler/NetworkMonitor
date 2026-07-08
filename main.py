@@ -76,6 +76,7 @@ class MonitorConfig:
     auto_discover: bool = True
     scan_interval_seconds: int = 300
     notifications_enabled: bool = True
+    peer_order: list[str] = field(default_factory=list)
     networks: list[NetworkConfig] = field(default_factory=list)
 
     @property
@@ -84,7 +85,7 @@ class MonitorConfig:
         for network in self.networks:
             if network.enabled:
                 result.extend(network.peers)
-        return result
+        return sort_peers_by_order(result, self.peer_order)
 
     @property
     def peers(self) -> list[Peer]:
@@ -93,6 +94,15 @@ class MonitorConfig:
     @property
     def hidden_peers(self) -> list[Peer]:
         return [peer for peer in self.all_peers if peer.hidden]
+
+
+def sort_peers_by_order(peers: list[Peer], order: list[str]) -> list[Peer]:
+    if not order:
+        return peers
+
+    rank = {ip: index for index, ip in enumerate(order)}
+    fallback = len(order)
+    return sorted(peers, key=lambda peer: (rank.get(peer.ip, fallback), peer.ip))
 
 
 def setup_logging() -> None:
@@ -263,8 +273,82 @@ def load_config() -> MonitorConfig:
         auto_discover=global_auto_discover,
         scan_interval_seconds=int(raw.get("scan_interval_seconds", 300)),
         notifications_enabled=bool(raw.get("notifications_enabled", True)),
+        peer_order=ensure_peer_order(raw),
         networks=networks,
     )
+
+
+def collect_peer_ips(raw: dict) -> list[str]:
+    ips: list[str] = []
+    for network in raw.get("networks", []):
+        for peer in network.get("peers", []):
+            ip = peer.get("ip", "").strip()
+            if ip:
+                ips.append(ip)
+    return ips
+
+
+def ensure_peer_order(raw: dict) -> list[str]:
+    known_ips = collect_peer_ips(raw)
+    order = [ip for ip in raw.get("peer_order", []) if ip in known_ips]
+    for ip in known_ips:
+        if ip not in order:
+            order.append(ip)
+    raw["peer_order"] = order
+    return order
+
+
+def save_peer_order(order: list[str]) -> None:
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    known_ips = set(collect_peer_ips(raw))
+    normalized = [ip for ip in order if ip in known_ips]
+    for ip in known_ips:
+        if ip not in normalized:
+            normalized.append(ip)
+
+    raw["peer_order"] = normalized
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def move_peer(dragged_ip: str, target_ip: str) -> bool:
+    if dragged_ip == target_ip:
+        return False
+
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    order = ensure_peer_order(raw)
+    if dragged_ip not in order:
+        return False
+
+    order.remove(dragged_ip)
+    if target_ip in order:
+        order.insert(order.index(target_ip), dragged_ip)
+    else:
+        order.append(dragged_ip)
+
+    raw["peer_order"] = order
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    logging.info("Peer reordenado: %s -> antes de %s", dragged_ip, target_ip)
+    return True
+
+
+def move_peer_to_end(dragged_ip: str) -> bool:
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    order = ensure_peer_order(raw)
+    if dragged_ip not in order:
+        return False
+
+    order.remove(dragged_ip)
+    order.append(dragged_ip)
+    raw["peer_order"] = order
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    logging.info("Peer movido para o final: %s", dragged_ip)
+    return True
 
 
 def set_notifications_enabled(enabled: bool) -> None:
@@ -412,6 +496,12 @@ def persist_discovered_peers(network_name: str, discovered: list[Peer]) -> None:
             continue
         target["peers"].append({"name": peer.name, "ip": peer.ip})
         existing_ips.add(peer.ip)
+
+    order = ensure_peer_order(raw)
+    for peer in discovered:
+        if peer.ip not in order:
+            order.append(peer.ip)
+    raw["peer_order"] = order
 
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
 

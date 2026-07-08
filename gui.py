@@ -53,6 +53,10 @@ class StatusWindow:
         self._context_menu: tk.Menu | None = None
         self._context_ip: str | None = None
         self._context_hidden: bool = False
+        self._drag_ip: str | None = None
+        self._drag_start_y: int = 0
+        self._drag_active: bool = False
+        self._drag_target_ip: str | None = None
         self._lock = threading.Lock()
 
     @property
@@ -185,7 +189,11 @@ class StatusWindow:
         self._tree.tag_configure(STATUS_OFFLINE, foreground=COLORS[STATUS_OFFLINE])
         self._tree.tag_configure(STATUS_UNKNOWN, foreground=COLORS[STATUS_UNKNOWN])
         self._tree.tag_configure(STATUS_HIDDEN, foreground=COLORS[STATUS_HIDDEN])
+        self._tree.tag_configure("drag_target", background="#dbeafe")
 
+        self._tree.bind("<ButtonPress-1>", self._on_drag_press)
+        self._tree.bind("<B1-Motion>", self._on_drag_motion)
+        self._tree.bind("<ButtonRelease-1>", self._on_drag_release)
         self._tree.bind("<Double-1>", self._on_double_click)
         self._tree.bind("<Button-3>", self._on_right_click)
         self._tree.bind("<F2>", self._on_f2)
@@ -195,12 +203,87 @@ class StatusWindow:
 
         footer = ttk.Label(
             container,
-            text="Duplo clique/F2 renomeia · Delete oculta · Clique direito para mais opções",
+            text="Arraste para reordenar · Duplo clique/F2 renomeia · Delete oculta · Clique direito para mais opções",
             style="Muted.TLabel",
         )
         footer.pack(anchor=tk.W, pady=(12, 0))
 
+    def _on_drag_press(self, event: tk.Event) -> None:
+        if self._tree is None or self._edit_entry is not None:
+            return
+        if self._tree.identify_region(event.x, event.y) != "cell":
+            return
+
+        item = self._tree.identify_row(event.y)
+        if not item:
+            return
+
+        self._drag_ip = self._tree.set(item, "ip")
+        self._drag_start_y = event.y
+        self._drag_active = False
+        self._drag_target_ip = None
+        self._tree.selection_set(item)
+
+    def _on_drag_motion(self, event: tk.Event) -> None:
+        if self._tree is None or self._drag_ip is None:
+            return
+
+        if not self._drag_active and abs(event.y - self._drag_start_y) < 8:
+            return
+
+        self._drag_active = True
+        self._tree.configure(cursor="hand2")
+
+        target_item = self._tree.identify_row(event.y)
+        self._clear_drag_highlight()
+
+        if target_item:
+            self._drag_target_ip = self._tree.set(target_item, "ip")
+            current_tags = self._tree.item(target_item, "tags")
+            self._tree.item(target_item, tags=(*current_tags, "drag_target"))
+
+    def _on_drag_release(self, event: tk.Event) -> None:
+        if self._tree is None:
+            return
+
+        self._tree.configure(cursor="")
+        self._clear_drag_highlight()
+
+        if not self._drag_active or not self._drag_ip:
+            self._reset_drag_state()
+            return
+
+        from main import move_peer, move_peer_to_end
+
+        target_item = self._tree.identify_row(event.y)
+        changed = False
+        if target_item:
+            target_ip = self._tree.set(target_item, "ip")
+            if target_ip != self._drag_ip:
+                changed = move_peer(self._drag_ip, target_ip)
+        else:
+            changed = move_peer_to_end(self._drag_ip)
+
+        self._reset_drag_state()
+        if changed:
+            self._refresh_data()
+
+    def _clear_drag_highlight(self) -> None:
+        if self._tree is None:
+            return
+        for item in self._tree.get_children():
+            tags = tuple(tag for tag in self._tree.item(item, "tags") if tag != "drag_target")
+            self._tree.item(item, tags=tags)
+
+    def _reset_drag_state(self) -> None:
+        self._drag_ip = None
+        self._drag_start_y = 0
+        self._drag_active = False
+        self._drag_target_ip = None
+
     def _on_double_click(self, event: tk.Event) -> None:
+        if self._drag_active:
+            return
         if self._tree is None:
             return
         if self._tree.identify_region(event.x, event.y) != "cell":
@@ -233,6 +316,8 @@ class StatusWindow:
         self._context_menu.delete(0, tk.END)
         self._context_menu.add_command(label="Renomear", command=self._rename_selected)
         self._context_menu.add_separator()
+        self._context_menu.add_command(label="Mover para o topo", command=self._move_selected_to_top)
+        self._context_menu.add_separator()
         if peer.hidden:
             self._context_menu.add_command(label="Mostrar dispositivo", command=self._show_selected)
         else:
@@ -259,6 +344,19 @@ class StatusWindow:
         selection = self._tree.selection()
         if selection:
             self._start_rename(selection[0])
+
+    def _move_selected_to_top(self) -> None:
+        ip = self._selected_ip()
+        if not ip or self._tree is None:
+            return
+
+        from main import load_config, move_peer
+
+        config = load_config()
+        display_peers = self._peers_to_display(config)
+        first_ip = next((peer.ip for peer in display_peers if peer.ip != ip), None)
+        if first_ip and move_peer(ip, first_ip):
+            self._refresh_data()
 
     def _hide_selected(self) -> None:
         ip = self._selected_ip()
@@ -347,6 +445,10 @@ class StatusWindow:
             return
 
         if self._edit_entry is not None:
+            self._schedule_refresh()
+            return
+
+        if self._drag_active:
             self._schedule_refresh()
             return
 
