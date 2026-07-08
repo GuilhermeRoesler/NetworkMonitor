@@ -13,11 +13,13 @@ REFRESH_MS = 3000
 STATUS_ONLINE = "Online"
 STATUS_OFFLINE = "Offline"
 STATUS_UNKNOWN = "Desconhecido"
+STATUS_HIDDEN = "Oculto"
 
 COLORS = {
     STATUS_ONLINE: "#1a7f37",
     STATUS_OFFLINE: "#cf222e",
     STATUS_UNKNOWN: "#6e7781",
+    STATUS_HIDDEN: "#8b949e",
     "bg": "#f6f8fa",
     "card": "#ffffff",
     "text": "#24292f",
@@ -42,11 +44,14 @@ class StatusWindow:
         self._summary_var: tk.StringVar | None = None
         self._local_ip_var: tk.StringVar | None = None
         self._updated_var: tk.StringVar | None = None
+        self._show_hidden_var: tk.BooleanVar | None = None
         self._refresh_job: str | None = None
         self._edit_entry: ttk.Entry | None = None
         self._editing_ip: str | None = None
         self._editing_item: str | None = None
         self._context_menu: tk.Menu | None = None
+        self._context_ip: str | None = None
+        self._context_hidden: bool = False
         self._lock = threading.Lock()
 
     @property
@@ -83,7 +88,7 @@ class StatusWindow:
     def _run(self) -> None:
         self._root = tk.Tk()
         self._root.title(APP_NAME)
-        self._root.geometry("560x460")
+        self._root.geometry("560x480")
         self._root.minsize(480, 360)
         self._root.configure(bg=COLORS["bg"])
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -133,6 +138,14 @@ class StatusWindow:
 
         ttk.Button(toolbar, text="Atualizar agora", command=self._refresh_data).pack(side=tk.LEFT)
 
+        self._show_hidden_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            toolbar,
+            text="Mostrar ocultos",
+            variable=self._show_hidden_var,
+            command=self._refresh_data,
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
         self._updated_var = tk.StringVar(value="")
         ttk.Label(toolbar, textvariable=self._updated_var, style="Muted.TLabel").pack(side=tk.RIGHT)
 
@@ -162,17 +175,18 @@ class StatusWindow:
         self._tree.tag_configure(STATUS_ONLINE, foreground=COLORS[STATUS_ONLINE])
         self._tree.tag_configure(STATUS_OFFLINE, foreground=COLORS[STATUS_OFFLINE])
         self._tree.tag_configure(STATUS_UNKNOWN, foreground=COLORS[STATUS_UNKNOWN])
+        self._tree.tag_configure(STATUS_HIDDEN, foreground=COLORS[STATUS_HIDDEN])
 
         self._tree.bind("<Double-1>", self._on_double_click)
         self._tree.bind("<Button-3>", self._on_right_click)
         self._tree.bind("<F2>", self._on_f2)
+        self._tree.bind("<Delete>", self._on_delete_key)
 
         self._context_menu = tk.Menu(self._root, tearoff=0)
-        self._context_menu.add_command(label="Renomear", command=self._rename_selected)
 
         footer = ttk.Label(
             container,
-            text="Duplo clique ou F2 no nome para renomear · A janela pode ser fechada — o monitor continua na bandeja.",
+            text="Duplo clique/F2 renomeia · Delete oculta · Clique direito para mais opções",
             style="Muted.TLabel",
         )
         footer.pack(anchor=tk.W, pady=(12, 0))
@@ -192,12 +206,43 @@ class StatusWindow:
         if self._tree is None or self._context_menu is None:
             return
         item = self._tree.identify_row(event.y)
-        if item:
-            self._tree.selection_set(item)
-            self._context_menu.tk_popup(event.x_root, event.y_root)
+        if not item:
+            return
+
+        self._tree.selection_set(item)
+        ip = self._tree.set(item, "ip")
+        from main import load_config
+
+        config = load_config()
+        peer = next((p for p in config.all_peers if p.ip == ip), None)
+        if peer is None:
+            return
+
+        self._context_ip = ip
+        self._context_hidden = peer.hidden
+
+        self._context_menu.delete(0, tk.END)
+        self._context_menu.add_command(label="Renomear", command=self._rename_selected)
+        self._context_menu.add_separator()
+        if peer.hidden:
+            self._context_menu.add_command(label="Mostrar dispositivo", command=self._show_selected)
+        else:
+            self._context_menu.add_command(label="Ocultar dispositivo", command=self._hide_selected)
+        self._context_menu.tk_popup(event.x_root, event.y_root)
 
     def _on_f2(self, _event: tk.Event) -> None:
         self._rename_selected()
+
+    def _on_delete_key(self, _event: tk.Event) -> None:
+        self._hide_selected()
+
+    def _selected_ip(self) -> str | None:
+        if self._tree is None:
+            return None
+        selection = self._tree.selection()
+        if not selection:
+            return None
+        return self._tree.set(selection[0], "ip")
 
     def _rename_selected(self) -> None:
         if self._tree is None:
@@ -205,6 +250,22 @@ class StatusWindow:
         selection = self._tree.selection()
         if selection:
             self._start_rename(selection[0])
+
+    def _hide_selected(self) -> None:
+        ip = self._selected_ip()
+        if ip:
+            self._set_hidden(ip, True)
+
+    def _show_selected(self) -> None:
+        ip = self._selected_ip() or self._context_ip
+        if ip:
+            self._set_hidden(ip, False)
+
+    def _set_hidden(self, ip: str, hidden: bool) -> None:
+        from main import set_peer_hidden
+
+        if set_peer_hidden(ip, hidden):
+            self._refresh_data()
 
     def _start_rename(self, item: str) -> None:
         if self._tree is None or self._root is None:
@@ -259,6 +320,11 @@ class StatusWindow:
         self._editing_item = None
         self._editing_ip = None
 
+    def _peers_to_display(self, config) -> list:
+        if self._show_hidden_var and self._show_hidden_var.get():
+            return config.all_peers
+        return config.peers
+
     def _refresh_data(self) -> None:
         if self._root is None or self._tree is None:
             return
@@ -273,6 +339,7 @@ class StatusWindow:
         lan_ip = get_lan_ip()
         config = load_config()
         state = load_state()
+        display_peers = self._peers_to_display(config)
 
         if self._local_ip_var is not None:
             parts = []
@@ -295,17 +362,23 @@ class StatusWindow:
 
         online_count = 0
         restore_selection = None
-        for peer in config.peers:
-            online = state.get(peer.ip)
-            label = status_label(online)
-            if online is True:
-                online_count += 1
+        for peer in display_peers:
+            if peer.hidden:
+                label = STATUS_HIDDEN
+                tags = (STATUS_HIDDEN,)
+            else:
+                online = state.get(peer.ip)
+                label = status_label(online)
+                tags = (label,)
+                if online is True:
+                    online_count += 1
+
             item_id = self._tree.insert(
                 "",
                 tk.END,
                 iid=peer.ip,
                 values=(peer.name, peer.ip, label),
-                tags=(label,),
+                tags=tags,
             )
             if peer.ip == selected_ip:
                 restore_selection = item_id
@@ -314,12 +387,17 @@ class StatusWindow:
             self._tree.selection_set(restore_selection)
             self._tree.focus(restore_selection)
 
-        total = len(config.peers)
+        visible_total = len(config.peers)
+        hidden_total = len(config.hidden_peers)
         if self._summary_var is not None:
-            if total == 0:
+            if visible_total == 0 and hidden_total == 0:
                 self._summary_var.set("Nenhum peer configurado em peers.json")
             else:
-                self._summary_var.set(f"{online_count} online · {total - online_count} offline · {total} total")
+                offline_count = visible_total - online_count
+                summary = f"{online_count} online · {offline_count} offline · {visible_total} visíveis"
+                if hidden_total:
+                    summary += f" · {hidden_total} ocultos"
+                self._summary_var.set(summary)
 
         if self._updated_var is not None:
             self._updated_var.set(f"Atualizado às {datetime.now().strftime('%H:%M:%S')}")

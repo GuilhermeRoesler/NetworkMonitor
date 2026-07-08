@@ -57,6 +57,7 @@ class Peer:
     name: str
     network_name: str = ""
     network_type: str = "radmin"
+    hidden: bool = False
     online: bool | None = None
 
 
@@ -77,12 +78,20 @@ class MonitorConfig:
     networks: list[NetworkConfig] = field(default_factory=list)
 
     @property
-    def peers(self) -> list[Peer]:
+    def all_peers(self) -> list[Peer]:
         result: list[Peer] = []
         for network in self.networks:
             if network.enabled:
                 result.extend(network.peers)
         return result
+
+    @property
+    def peers(self) -> list[Peer]:
+        return [peer for peer in self.all_peers if not peer.hidden]
+
+    @property
+    def hidden_peers(self) -> list[Peer]:
+        return [peer for peer in self.all_peers if peer.hidden]
 
 
 def setup_logging() -> None:
@@ -234,6 +243,7 @@ def load_config() -> MonitorConfig:
                         name=peer.get("name", ip),
                         network_name=network_name,
                         network_type=network_type,
+                        hidden=bool(peer.get("hidden", False)),
                     )
                 )
 
@@ -412,6 +422,34 @@ def update_peer_name(ip: str, new_name: str) -> bool:
 
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     logging.info("Peer renomeado: %s -> %s", ip, new_name)
+    return True
+
+
+def set_peer_hidden(ip: str, hidden: bool) -> bool:
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    found = False
+    peer_name = ip
+    for network in raw.get("networks", []):
+        for peer in network.get("peers", []):
+            if peer.get("ip") == ip:
+                peer_name = peer.get("name", ip)
+                if hidden:
+                    peer["hidden"] = True
+                else:
+                    peer.pop("hidden", None)
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        return False
+
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    action = "ocultado" if hidden else "reativado"
+    logging.info("Peer %s: %s (%s)", action, peer_name, ip)
     return True
 
 
@@ -632,7 +670,7 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         now = time.time()
         all_peers: list[Peer] = []
-        known_global_ips: set[str] = set()
+        known_global_ips: set[str] = {p.ip for p in config.all_peers}
         config_changed = False
 
         local_ips = [ip for ip in (get_radmin_ip(), get_lan_ip()) if ip]
@@ -652,9 +690,12 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
 
         if config_changed:
             config = load_config()
-            all_peers = config.peers
+            all_peers = config.all_peers
+            known_global_ips.update(p.ip for p in all_peers)
 
-        if not all_peers:
+        visible_peers = [peer for peer in all_peers if not peer.hidden]
+
+        if not visible_peers:
             active = [n.name for n in config.networks if n.enabled]
             if not active:
                 logging.warning("Nenhuma rede habilitada em peers.json.")
@@ -666,14 +707,16 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
                 break
             continue
 
-        state = check_peers(all_peers, state)
+        state = check_peers(visible_peers, state)
         save_state(state)
 
-        online_count = sum(1 for peer in all_peers if state.get(peer.ip))
+        online_count = sum(1 for peer in visible_peers if state.get(peer.ip))
+        hidden_count = len(config.hidden_peers)
         logging.info(
-            "Verificação concluída: %d/%d online (Radmin: %s · LAN: %s)",
+            "Verificação concluída: %d/%d online (%d ocultos) · Radmin: %s · LAN: %s",
             online_count,
-            len(all_peers),
+            len(visible_peers),
+            hidden_count,
             get_radmin_ip() or "—",
             get_lan_ip() or "—",
         )
@@ -746,7 +789,7 @@ def scan_network(network_type: str) -> bool:
         print(f"Nenhuma rede do tipo '{network_type}' habilitada em peers.json.")
         return False
 
-    known_ips = {peer.ip for peer in config.peers} | {local_ip}
+    known_ips = {peer.ip for peer in config.all_peers} | {local_ip}
     discovered = discover_peers(
         local_ip,
         known_ips,
@@ -790,7 +833,8 @@ def show_status() -> None:
 
     print(f"IP Radmin: {radmin_ip or 'não detectado'}")
     print(f"IP LAN:    {lan_ip or 'não detectado'}")
-    print(f"Peers configurados: {len(config.peers)}")
+    print(f"Peers visíveis: {len(config.peers)}")
+    print(f"Peers ocultos:  {len(config.hidden_peers)}")
     print(f"Intervalo de verificação: {config.interval_seconds}s")
     print(f"Auto-descoberta global: {'sim' if config.auto_discover else 'não'}")
     print()
