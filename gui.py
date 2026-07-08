@@ -45,6 +45,7 @@ class StatusWindow:
         self._local_ip_var: tk.StringVar | None = None
         self._updated_var: tk.StringVar | None = None
         self._show_hidden_var: tk.BooleanVar | None = None
+        self._notifications_var: tk.BooleanVar | None = None
         self._refresh_job: str | None = None
         self._edit_entry: ttk.Entry | None = None
         self._editing_ip: str | None = None
@@ -137,6 +138,14 @@ class StatusWindow:
         toolbar.pack(fill=tk.X, pady=(0, 8))
 
         ttk.Button(toolbar, text="Atualizar agora", command=self._refresh_data).pack(side=tk.LEFT)
+
+        self._notifications_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            toolbar,
+            text="Notificações",
+            variable=self._notifications_var,
+            command=self._toggle_notifications,
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
         self._show_hidden_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -320,6 +329,14 @@ class StatusWindow:
         self._editing_item = None
         self._editing_ip = None
 
+    def _toggle_notifications(self) -> None:
+        from main import set_notifications_enabled
+
+        if self._notifications_var is None:
+            return
+        set_notifications_enabled(self._notifications_var.get())
+        self._refresh_data()
+
     def _peers_to_display(self, config) -> list:
         if self._show_hidden_var and self._show_hidden_var.get():
             return config.all_peers
@@ -340,6 +357,9 @@ class StatusWindow:
         config = load_config()
         state = load_state()
         display_peers = self._peers_to_display(config)
+
+        if self._notifications_var is not None:
+            self._notifications_var.set(config.notifications_enabled)
 
         if self._local_ip_var is not None:
             parts = []
@@ -397,6 +417,8 @@ class StatusWindow:
                 summary = f"{online_count} online · {offline_count} offline · {visible_total} visíveis"
                 if hidden_total:
                     summary += f" · {hidden_total} ocultos"
+                if not config.notifications_enabled:
+                    summary += " · notificações pausadas"
                 self._summary_var.set(summary)
 
         if self._updated_var is not None:

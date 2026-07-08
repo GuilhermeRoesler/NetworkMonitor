@@ -75,6 +75,7 @@ class MonitorConfig:
     interval_seconds: int = 15
     auto_discover: bool = True
     scan_interval_seconds: int = 300
+    notifications_enabled: bool = True
     networks: list[NetworkConfig] = field(default_factory=list)
 
     @property
@@ -261,8 +262,23 @@ def load_config() -> MonitorConfig:
         interval_seconds=int(raw.get("interval_seconds", 15)),
         auto_discover=global_auto_discover,
         scan_interval_seconds=int(raw.get("scan_interval_seconds", 300)),
+        notifications_enabled=bool(raw.get("notifications_enabled", True)),
         networks=networks,
     )
+
+
+def set_notifications_enabled(enabled: bool) -> None:
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    raw["notifications_enabled"] = enabled
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    status = "ativadas" if enabled else "pausadas"
+    logging.info("Notificações %s", status)
+
+
+def notifications_enabled() -> bool:
+    return load_config().notifications_enabled
 
 
 def save_default_config() -> None:
@@ -270,6 +286,7 @@ def save_default_config() -> None:
         "interval_seconds": 15,
         "auto_discover": True,
         "scan_interval_seconds": 300,
+        "notifications_enabled": True,
         "networks": [
             {
                 "name": "Radmin VPN",
@@ -454,6 +471,10 @@ def set_peer_hidden(ip: str, hidden: bool) -> bool:
 
 
 def notify(title: str, message: str) -> None:
+    if not notifications_enabled():
+        logging.debug("Notificação suprimida: %s — %s", title, message)
+        return
+
     toast = Notification(
         app_id=APP_NAME,
         title=title,
@@ -743,6 +764,9 @@ def run_with_tray() -> None:
     def open_panel(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         status_window.show()
 
+    def toggle_notifications(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        set_notifications_enabled(not notifications_enabled())
+
     def quit_app(icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         logging.info("Encerrando pelo menu da bandeja...")
         stop_event.set()
@@ -755,6 +779,11 @@ def run_with_tray() -> None:
         APP_NAME,
         menu=pystray.Menu(
             pystray.MenuItem("Abrir painel", open_panel, default=True),
+            pystray.MenuItem(
+                "Notificações",
+                toggle_notifications,
+                checked=lambda _item: notifications_enabled(),
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Encerrar", quit_app),
         ),
@@ -837,6 +866,7 @@ def show_status() -> None:
     print(f"Peers ocultos:  {len(config.hidden_peers)}")
     print(f"Intervalo de verificação: {config.interval_seconds}s")
     print(f"Auto-descoberta global: {'sim' if config.auto_discover else 'não'}")
+    print(f"Notificações: {'ativadas' if config.notifications_enabled else 'pausadas'}")
     print()
 
     if not config.peers:
