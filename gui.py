@@ -253,7 +253,13 @@ class StatusWindow:
             self._reset_drag_state()
             return
 
-        from main import move_peer, move_peer_to_end
+        from main import load_config, move_peer, move_peer_to_end
+
+        config = load_config()
+        dragged_peer = next((peer for peer in config.all_peers if peer.ip == self._drag_ip), None)
+        if dragged_peer is not None and dragged_peer.hidden:
+            self._reset_drag_state()
+            return
 
         target_item = self._tree.identify_row(event.y)
         changed = False

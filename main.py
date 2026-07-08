@@ -98,11 +98,16 @@ class MonitorConfig:
 
 def sort_peers_by_order(peers: list[Peer], order: list[str]) -> list[Peer]:
     if not order:
-        return peers
+        visible = [peer for peer in peers if not peer.hidden]
+        hidden = [peer for peer in peers if peer.hidden]
+        return visible + hidden
 
     rank = {ip: index for index, ip in enumerate(order)}
     fallback = len(order)
-    return sorted(peers, key=lambda peer: (rank.get(peer.ip, fallback), peer.ip))
+    return sorted(
+        peers,
+        key=lambda peer: (1 if peer.hidden else 0, rank.get(peer.ip, fallback), peer.ip),
+    )
 
 
 def setup_logging() -> None:
@@ -234,6 +239,7 @@ def load_config() -> MonitorConfig:
     with CONFIG_PATH.open(encoding="utf-8") as handle:
         raw = json.load(handle)
 
+    original_order = list(raw.get("peer_order", []))
     global_auto_discover = bool(raw.get("auto_discover", True))
     networks: list[NetworkConfig] = []
 
@@ -268,12 +274,16 @@ def load_config() -> MonitorConfig:
             )
         )
 
+    peer_order = ensure_peer_order(raw)
+    if peer_order != original_order:
+        CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+
     return MonitorConfig(
         interval_seconds=int(raw.get("interval_seconds", 15)),
         auto_discover=global_auto_discover,
         scan_interval_seconds=int(raw.get("scan_interval_seconds", 300)),
         notifications_enabled=bool(raw.get("notifications_enabled", True)),
-        peer_order=ensure_peer_order(raw),
+        peer_order=peer_order,
         networks=networks,
     )
 
@@ -288,14 +298,33 @@ def collect_peer_ips(raw: dict) -> list[str]:
     return ips
 
 
-def ensure_peer_order(raw: dict) -> list[str]:
+def get_hidden_ips(raw: dict) -> set[str]:
+    hidden: set[str] = set()
+    for network in raw.get("networks", []):
+        for peer in network.get("peers", []):
+            ip = peer.get("ip", "").strip()
+            if ip and peer.get("hidden"):
+                hidden.add(ip)
+    return hidden
+
+
+def normalize_peer_order(raw: dict) -> list[str]:
     known_ips = collect_peer_ips(raw)
+    hidden_ips = get_hidden_ips(raw)
     order = [ip for ip in raw.get("peer_order", []) if ip in known_ips]
     for ip in known_ips:
         if ip not in order:
             order.append(ip)
-    raw["peer_order"] = order
-    return order
+
+    visible = [ip for ip in order if ip not in hidden_ips]
+    hidden = [ip for ip in order if ip in hidden_ips]
+    normalized = visible + hidden
+    raw["peer_order"] = normalized
+    return normalized
+
+
+def ensure_peer_order(raw: dict) -> list[str]:
+    return normalize_peer_order(raw)
 
 
 def save_peer_order(order: list[str]) -> None:
@@ -303,12 +332,15 @@ def save_peer_order(order: list[str]) -> None:
         raw = json.load(handle)
 
     known_ips = set(collect_peer_ips(raw))
+    hidden_ips = get_hidden_ips(raw)
     normalized = [ip for ip in order if ip in known_ips]
     for ip in known_ips:
         if ip not in normalized:
             normalized.append(ip)
 
-    raw["peer_order"] = normalized
+    visible = [ip for ip in normalized if ip not in hidden_ips]
+    hidden = [ip for ip in normalized if ip in hidden_ips]
+    raw["peer_order"] = visible + hidden
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -319,17 +351,24 @@ def move_peer(dragged_ip: str, target_ip: str) -> bool:
     with CONFIG_PATH.open(encoding="utf-8") as handle:
         raw = json.load(handle)
 
-    order = ensure_peer_order(raw)
+    hidden_ips = get_hidden_ips(raw)
+    if dragged_ip in hidden_ips:
+        return False
+
+    order = normalize_peer_order(raw)
     if dragged_ip not in order:
         return False
 
-    order.remove(dragged_ip)
-    if target_ip in order:
-        order.insert(order.index(target_ip), dragged_ip)
-    else:
-        order.append(dragged_ip)
+    visible = [ip for ip in order if ip not in hidden_ips]
+    hidden = [ip for ip in order if ip in hidden_ips]
+    visible.remove(dragged_ip)
 
-    raw["peer_order"] = order
+    if target_ip in hidden_ips:
+        visible.append(dragged_ip)
+    else:
+        visible.insert(visible.index(target_ip), dragged_ip)
+
+    raw["peer_order"] = visible + hidden
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     logging.info("Peer reordenado: %s -> antes de %s", dragged_ip, target_ip)
     return True
@@ -339,15 +378,22 @@ def move_peer_to_end(dragged_ip: str) -> bool:
     with CONFIG_PATH.open(encoding="utf-8") as handle:
         raw = json.load(handle)
 
-    order = ensure_peer_order(raw)
+    hidden_ips = get_hidden_ips(raw)
+    if dragged_ip in hidden_ips:
+        return False
+
+    order = normalize_peer_order(raw)
     if dragged_ip not in order:
         return False
 
-    order.remove(dragged_ip)
-    order.append(dragged_ip)
-    raw["peer_order"] = order
+    visible = [ip for ip in order if ip not in hidden_ips]
+    hidden = [ip for ip in order if ip in hidden_ips]
+    visible.remove(dragged_ip)
+    visible.append(dragged_ip)
+
+    raw["peer_order"] = visible + hidden
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-    logging.info("Peer movido para o final: %s", dragged_ip)
+    logging.info("Peer movido para o final da lista visível: %s", dragged_ip)
     return True
 
 
@@ -402,7 +448,10 @@ def load_state() -> dict[str, bool]:
 
 
 def save_state(state: dict[str, bool]) -> None:
-    STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    config = load_config()
+    hidden_ips = {peer.ip for peer in config.hidden_peers}
+    cleaned = {ip: online for ip, online in state.items() if ip not in hidden_ips}
+    STATE_PATH.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
 
 
 def ping_host(ip: str, timeout_ms: int = 1000) -> bool:
@@ -554,6 +603,7 @@ def set_peer_hidden(ip: str, hidden: bool) -> bool:
     if not found:
         return False
 
+    normalize_peer_order(raw)
     CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     action = "ocultado" if hidden else "reativado"
     logging.info("Peer %s: %s (%s)", action, peer_name, ip)
@@ -577,10 +627,11 @@ def notify(title: str, message: str) -> None:
 
 
 def check_peers(peers: list[Peer], previous: dict[str, bool]) -> dict[str, bool]:
-    current: dict[str, bool] = {}
+    current: dict[str, bool] = dict(previous)
+    monitored = [peer for peer in peers if not peer.hidden]
 
     with ThreadPoolExecutor(max_workers=16) as executor:
-        futures = {executor.submit(ping_host, peer.ip): peer for peer in peers}
+        futures = {executor.submit(ping_host, peer.ip): peer for peer in monitored}
         for future in as_completed(futures):
             peer = futures[future]
             online = future.result()
@@ -598,6 +649,10 @@ def check_peers(peers: list[Peer], previous: dict[str, bool]) -> dict[str, bool]
                 title=f"[{peer.network_name}] {peer.name} {status}",
                 message=f"IP: {peer.ip}",
             )
+
+    for peer in peers:
+        if peer.hidden and peer.ip in current:
+            del current[peer.ip]
 
     return current
 
