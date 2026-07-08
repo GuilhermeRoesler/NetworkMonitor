@@ -14,12 +14,14 @@ STATUS_ONLINE = "Online"
 STATUS_OFFLINE = "Offline"
 STATUS_UNKNOWN = "Desconhecido"
 STATUS_HIDDEN = "Oculto"
+STATUS_MUTED = "Silenciado"
 
 COLORS = {
     STATUS_ONLINE: "#1a7f37",
     STATUS_OFFLINE: "#cf222e",
     STATUS_UNKNOWN: "#6e7781",
     STATUS_HIDDEN: "#8b949e",
+    STATUS_MUTED: "#9a6700",
     "bg": "#f6f8fa",
     "card": "#ffffff",
     "text": "#24292f",
@@ -189,6 +191,7 @@ class StatusWindow:
         self._tree.tag_configure(STATUS_OFFLINE, foreground=COLORS[STATUS_OFFLINE])
         self._tree.tag_configure(STATUS_UNKNOWN, foreground=COLORS[STATUS_UNKNOWN])
         self._tree.tag_configure(STATUS_HIDDEN, foreground=COLORS[STATUS_HIDDEN])
+        self._tree.tag_configure(STATUS_MUTED, foreground=COLORS[STATUS_MUTED])
         self._tree.tag_configure("drag_target", background="#dbeafe")
 
         self._tree.bind("<ButtonPress-1>", self._on_drag_press)
@@ -203,7 +206,7 @@ class StatusWindow:
 
         footer = ttk.Label(
             container,
-            text="Arraste para reordenar · Duplo clique/F2 renomeia · Delete oculta · Clique direito para mais opções",
+            text="Arraste para reordenar · Duplo clique/F2 renomeia · Delete oculta · Clique direito: ocultar ou silenciar",
             style="Muted.TLabel",
         )
         footer.pack(anchor=tk.W, pady=(12, 0))
@@ -328,6 +331,16 @@ class StatusWindow:
             self._context_menu.add_command(label="Mostrar dispositivo", command=self._show_selected)
         else:
             self._context_menu.add_command(label="Ocultar dispositivo", command=self._hide_selected)
+            if peer.muted:
+                self._context_menu.add_command(
+                    label="Ativar notificações",
+                    command=self._unmute_selected,
+                )
+            else:
+                self._context_menu.add_command(
+                    label="Silenciar notificações",
+                    command=self._mute_selected,
+                )
         self._context_menu.tk_popup(event.x_root, event.y_root)
 
     def _on_f2(self, _event: tk.Event) -> None:
@@ -380,6 +393,22 @@ class StatusWindow:
         if set_peer_hidden(ip, hidden):
             self._refresh_data()
 
+    def _mute_selected(self) -> None:
+        ip = self._selected_ip()
+        if ip:
+            self._set_muted(ip, True)
+
+    def _unmute_selected(self) -> None:
+        ip = self._selected_ip() or self._context_ip
+        if ip:
+            self._set_muted(ip, False)
+
+    def _set_muted(self, ip: str, muted: bool) -> None:
+        from main import set_peer_muted
+
+        if set_peer_muted(ip, muted):
+            self._refresh_data()
+
     def _start_rename(self, item: str) -> None:
         if self._tree is None or self._root is None:
             return
@@ -391,8 +420,11 @@ class StatusWindow:
             return
 
         x, y, width, height = bbox
-        current_name = self._tree.set(item, "name")
         ip = self._tree.set(item, "ip")
+        from main import load_config
+
+        peer = next((p for p in load_config().all_peers if p.ip == ip), None)
+        current_name = peer.name if peer else self._tree.set(item, "name").removeprefix("🔇 ").strip()
 
         self._editing_item = item
         self._editing_ip = ip
@@ -494,10 +526,15 @@ class StatusWindow:
             if peer.hidden:
                 label = STATUS_HIDDEN
                 tags = (STATUS_HIDDEN,)
+                display_name = peer.name
             else:
                 online = state.get(peer.ip)
                 label = status_label(online)
                 tags = (label,)
+                display_name = peer.name
+                if peer.muted:
+                    display_name = f"🔇 {peer.name}"
+                    tags = (label, STATUS_MUTED)
                 if online is True:
                     online_count += 1
 
@@ -505,7 +542,7 @@ class StatusWindow:
                 "",
                 tk.END,
                 iid=peer.ip,
-                values=(peer.name, peer.ip, label),
+                values=(display_name, peer.ip, label),
                 tags=tags,
             )
             if peer.ip == selected_ip:

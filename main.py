@@ -58,6 +58,7 @@ class Peer:
     network_name: str = ""
     network_type: str = "radmin"
     hidden: bool = False
+    muted: bool = False
     online: bool | None = None
 
 
@@ -261,6 +262,7 @@ def load_config() -> MonitorConfig:
                         network_name=network_name,
                         network_type=network_type,
                         hidden=bool(peer.get("hidden", False)),
+                        muted=bool(peer.get("muted", False)),
                     )
                 )
 
@@ -610,6 +612,34 @@ def set_peer_hidden(ip: str, hidden: bool) -> bool:
     return True
 
 
+def set_peer_muted(ip: str, muted: bool) -> bool:
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    found = False
+    peer_name = ip
+    for network in raw.get("networks", []):
+        for peer in network.get("peers", []):
+            if peer.get("ip") == ip:
+                peer_name = peer.get("name", ip)
+                if muted:
+                    peer["muted"] = True
+                else:
+                    peer.pop("muted", None)
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        return False
+
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    action = "silenciado" if muted else "com notificações"
+    logging.info("Peer %s: %s (%s)", action, peer_name, ip)
+    return True
+
+
 def notify(title: str, message: str) -> None:
     if not notifications_enabled():
         logging.debug("Notificação suprimida: %s — %s", title, message)
@@ -642,6 +672,9 @@ def check_peers(peers: list[Peer], previous: dict[str, bool]) -> dict[str, bool]
                 continue
 
             if previous[peer.ip] == online:
+                continue
+
+            if peer.muted:
                 continue
 
             status = "ficou online" if online else "ficou offline"
@@ -1010,7 +1043,8 @@ def show_status() -> None:
     print(f"Peers visíveis: {len(config.peers)}")
     print(f"Peers ocultos:  {len(config.hidden_peers)}")
     print(f"Intervalo de verificação: {config.interval_seconds}s")
-    print(f"Auto-descoberta global: {'sim' if config.auto_discover else 'não'}")
+    muted_count = sum(1 for peer in config.peers if peer.muted)
+    print(f"Peers silenciados: {muted_count}")
     print(f"Notificações: {'ativadas' if config.notifications_enabled else 'pausadas'}")
     print()
 
@@ -1030,7 +1064,7 @@ def show_status() -> None:
             status = "offline"
         else:
             status = "desconhecido"
-        print(f"  [{status:>11}] {peer.name} ({peer.ip})")
+        print(f"  [{status:>11}] {peer.name} ({peer.ip}){' [silenciado]' if peer.muted else ''}")
 
 
 def build_parser() -> argparse.ArgumentParser:
