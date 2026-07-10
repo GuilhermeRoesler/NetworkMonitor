@@ -51,8 +51,8 @@ python main.py --status
 | `python main.py --scan-lan` | Escaneia a sub-rede LAN uma vez |
 | `python main.py --scan-all` | Escaneia Radmin e LAN |
 | `python main.py --status` | Mostra IPs locais e status dos peers |
-| `python main.py --install` | Registra na inicialização do Windows |
-| `python main.py --uninstall` | Remove da inicialização do Windows |
+| `python main.py --install` | Cria atalho na pasta Startup do Windows |
+| `python main.py --uninstall` | Remove o atalho da pasta Startup do Windows |
 
 ## Painel gráfico
 
@@ -121,7 +121,7 @@ Peers também podem ser gerenciados pelo painel gráfico; as alterações são s
 python main.py --install
 ```
 
-Registra o app em `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` usando `pythonw.exe` (sem janela de terminal). Para remover:
+Cria o atalho `Network Monitor.lnk` em `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` (acessível via `shell:startup` no Explorer), executando `pythonw.exe` sem janela de terminal. Instalações antigas no registro ou via VBS são removidas automaticamente. Para remover:
 
 ```bash
 python main.py --uninstall

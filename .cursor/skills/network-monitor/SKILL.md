@@ -154,9 +154,9 @@ Ping usa `subprocess` com `ping -n 1 -w {timeout_ms}`; sucesso = `"ttl="` na sa�
 | `--scan-lan` | Scan único LAN |
 | `--scan-all` | Ambos |
 | `--status` | Status no terminal |
-| `--install` / `--uninstall` | Registro `HKCU\...\Run` (`RadminMonitor`) |
+| `--install` / `--uninstall` | Atalho `Network Monitor.lnk` em `%APPDATA%\...\Startup` (`shell:startup`) |
 
-Startup usa `pythonw.exe` + `--run`. VBS legado em `%APPDATA%\...\Startup\RadminMonitor.vbs` é removido no install.
+Startup usa `pythonw.exe` + `--run`. `--install` remove entradas legadas no registro `HKCU\...\Run` (`RadminMonitor`) e VBS `RadminMonitor.vbs`.
 
 ## GUI (`gui.py`)
 
