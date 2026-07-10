@@ -216,3 +216,8 @@ Para debug do loop sem bandeja: `python main.py --run` (logs em `monitor.log`).
 - [ ] GUI continua thread-safe (callbacks via `root.after`)
 - [ ] Textos em português
 - [ ] Sem dependências novas desnecessárias
+
+## Referência adicional
+
+- Exemplos completos de `peers.json` e `state.json`: [reference.md](reference.md)
+- Convenções de commit do repositório: [reference.md#convenções-de-commit](reference.md)
