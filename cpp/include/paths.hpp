@@ -1,11 +1,15 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace nm {
 
 namespace fs = std::filesystem;
+
+/// Quando definido, config/state/log usam este diretório (útil em testes).
+void set_app_dir_override(std::optional<fs::path> dir);
 
 fs::path resolve_app_dir();
 fs::path config_path();

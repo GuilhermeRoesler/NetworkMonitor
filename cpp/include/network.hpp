@@ -9,6 +9,9 @@
 
 namespace nm {
 
+bool is_radmin_ip(const std::string& ip);
+bool is_private_ip(const std::string& ip);
+
 std::optional<std::string> get_radmin_ip();
 std::optional<std::string> get_lan_ip();
 std::optional<std::string> get_local_ip(const std::string& network_type);

@@ -7,6 +7,8 @@
 namespace nm {
 namespace {
 
+std::optional<fs::path> g_app_dir_override;
+
 fs::path exe_dir() {
     wchar_t buffer[MAX_PATH]{};
     const DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
@@ -22,7 +24,13 @@ bool looks_like_repo_root(const fs::path& dir) {
 
 }  // namespace
 
+void set_app_dir_override(std::optional<fs::path> dir) { g_app_dir_override = std::move(dir); }
+
 fs::path resolve_app_dir() {
+    if (g_app_dir_override) {
+        return *g_app_dir_override;
+    }
+
     fs::path start = exe_dir();
     std::vector<fs::path> candidates = {
         start,

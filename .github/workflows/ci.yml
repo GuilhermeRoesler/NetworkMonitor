@@ -75,6 +75,9 @@ jobs:
       - name: Build Release
         run: cmake --build cpp/build --config Release --parallel
 
+      - name: CTest (unit tests)
+        run: ctest --test-dir cpp/build -C Release --output-on-failure
+
       - name: Smoke — --status
         run: |
           $exe = @(

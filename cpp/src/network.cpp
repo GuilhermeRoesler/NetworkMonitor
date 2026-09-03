@@ -20,7 +20,6 @@
 #include <vector>
 
 namespace nm {
-namespace {
 
 bool is_radmin_ip(const std::string& ip) { return ip.rfind("26.", 0) == 0; }
 
@@ -40,6 +39,8 @@ bool is_private_ip(const std::string& ip) {
     }
     return false;
 }
+
+namespace {
 
 std::string dword_to_ip(DWORD value) {
     // Registro Radmin guarda IPv4 em ordem de rede (big-endian dword)
