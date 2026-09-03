@@ -99,10 +99,31 @@ class StatusWindow:
         self._root.minsize(480, 360)
         self._root.configure(bg=COLORS["bg"])
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._apply_window_icon()
 
         self._build_ui()
         self._refresh_data()
         self._root.mainloop()
+
+    def _apply_window_icon(self) -> None:
+        assert self._root is not None
+        from main import ICON_ICO_NAME, ICON_PNG_NAME, resolve_asset_path
+
+        ico = resolve_asset_path(ICON_ICO_NAME)
+        png = resolve_asset_path(ICON_PNG_NAME)
+        if ico is not None:
+            try:
+                self._root.iconbitmap(default=str(ico))
+                return
+            except tk.TclError:
+                pass
+        if png is None:
+            return
+        try:
+            self._icon_photo = tk.PhotoImage(file=str(png))
+            self._root.iconphoto(True, self._icon_photo)
+        except tk.TclError:
+            pass
 
     def _on_close(self) -> None:
         self._cancel_rename()

@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import PyInstaller.__main__
 
 APP_NAME = "NetworkMonitor"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ASSETS_DIR = ROOT_DIR / "assets"
+ICON_ICO = ASSETS_DIR / "icon.ico"
 
 
 def build_args() -> list[str]:
+    sep = ";" if sys.platform == "win32" else ":"
     args = [
         "main.py",
         "--onedir",
@@ -21,6 +26,10 @@ def build_args() -> list[str]:
         "--collect-all=pystray",
         "--collect-all=PIL",
     ]
+    if ICON_ICO.is_file():
+        args.append(f"--icon={ICON_ICO}")
+    if ASSETS_DIR.is_dir():
+        args.append(f"--add-data={ASSETS_DIR}{sep}assets")
     if sys.platform == "win32":
         args.append("--windowed")
     return args

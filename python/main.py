@@ -44,6 +44,24 @@ APP_DIR = resolve_app_dir()
 CONFIG_PATH = APP_DIR / "peers.json"
 STATE_PATH = APP_DIR / "state.json"
 LOG_PATH = APP_DIR / "monitor.log"
+ICON_PNG_NAME = "icon.png"
+ICON_ICO_NAME = "icon.ico"
+
+
+def resolve_asset_path(name: str) -> Path | None:
+    """Localiza um asset em assets/ (dev, PyInstaller ou ao lado do .exe)."""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "assets" / name)
+        candidates.append(APP_DIR / "assets" / name)
+    candidates.append(APP_DIR / "assets" / name)
+    candidates.append(SCRIPT_DIR / "assets" / name)
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
 LEGACY_STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 LEGACY_STARTUP_VALUE = "RadminMonitor"
 STARTUP_LINK_NAME = f"{APP_NAME}.lnk"
@@ -652,12 +670,16 @@ def notify(title: str, message: str) -> None:
         logging.debug("Notificação suprimida: %s — %s", title, message)
         return
 
-    toast = Notification(
-        app_id=APP_NAME,
-        title=title,
-        msg=message,
-        duration="short",
-    )
+    icon = resolve_asset_path(ICON_PNG_NAME) or resolve_asset_path(ICON_ICO_NAME)
+    toast_kwargs: dict = {
+        "app_id": APP_NAME,
+        "title": title,
+        "msg": message,
+        "duration": "short",
+    }
+    if icon is not None:
+        toast_kwargs["icon"] = str(icon)
+    toast = Notification(**toast_kwargs)
     toast.set_audio(audio.Default, loop=False)
     toast.show()
     logging.info("Notificação: %s — %s", title, message)
@@ -804,12 +826,34 @@ def uninstall_startup() -> None:
 
 
 def create_tray_icon_image() -> Image.Image:
+    icon_path = resolve_asset_path(ICON_PNG_NAME) or resolve_asset_path(ICON_ICO_NAME)
+    if icon_path is not None:
+        with Image.open(icon_path) as image:
+            return image.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+
+    # Fallback se assets/ estiver ausente
     size = 64
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.ellipse((6, 6, size - 6, size - 6), fill=(0, 120, 215, 255))
-    draw.ellipse((18, 18, size - 18, size - 18), fill=(255, 255, 255, 255))
-    draw.ellipse((26, 26, size - 26, size - 26), fill=(0, 120, 215, 255))
+    margin = 4
+    draw.rounded_rectangle(
+        (margin, margin, size - margin, size - margin),
+        radius=12,
+        fill=(11, 31, 51, 255),
+    )
+    cx = cy = size // 2
+    for radius in (22, 16, 10):
+        box = (cx - radius, cy - radius, cx + radius, cy + radius)
+        draw.ellipse(box, outline=(61, 220, 255, 180), width=1)
+    nodes = ((cx, cy - 14), (cx - 14, cy + 10), (cx + 14, cy + 10), (cx, cy))
+    for x0, y0 in nodes[:3]:
+        draw.line((cx, cy, x0, y0), fill=(0, 180, 216, 255), width=2)
+    draw.line((nodes[0][0], nodes[0][1], nodes[1][0], nodes[1][1]), fill=(0, 180, 216, 220), width=1)
+    draw.line((nodes[1][0], nodes[1][1], nodes[2][0], nodes[2][1]), fill=(0, 180, 216, 220), width=1)
+    draw.line((nodes[2][0], nodes[2][1], nodes[0][0], nodes[0][1]), fill=(0, 180, 216, 220), width=1)
+    for x, y in nodes:
+        r = 4 if (x, y) != (cx, cy) else 5
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=(61, 220, 255, 255))
     return image
 
 

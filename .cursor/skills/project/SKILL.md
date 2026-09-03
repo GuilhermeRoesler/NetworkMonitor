@@ -32,6 +32,7 @@ python/gui.py             StatusWindow
 python/build.py           PyInstaller onedir
 python/tests/             pytest
 cpp/                      CMake → NetworkMonitorCpp.exe
+assets/                   icon.png / icon.ico (bandeja, GUI, exe)
 .github/workflows/        ci.yml, cd.yml
 .cursor/rules/            rules breves → skills
 .cursor/skills/           specs por área

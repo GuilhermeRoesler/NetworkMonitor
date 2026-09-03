@@ -63,6 +63,8 @@ Startup: `pythonw.exe` + `python/main.py --run`, `WorkingDirectory` = raiz. Remo
 Menu: Abrir painel · Notificações (toggle) · Encerrar.  
 Import de `gui` **lazy** (dentro da função) — nunca no top-level de `main.py`.
 
+Ícone: `assets/icon.png` / `assets/icon.ico` via `resolve_asset_path` (tray, toast, PyInstaller `--icon`).
+
 ## APIs usadas pela GUI
 
 `update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`.
