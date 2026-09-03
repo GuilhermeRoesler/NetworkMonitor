@@ -1038,7 +1038,7 @@ def run_with_tray() -> None:
     monitor_thread.start()
 
     def open_panel(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        status_window.show()
+        status_window.show(close_hides=True)
 
     def toggle_notifications(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         set_notifications_enabled(not notifications_enabled())
@@ -1070,6 +1070,7 @@ def run_with_tray() -> None:
 
     stop_event.set()
     status_window.close()
+    status_window.wait_closed(timeout=5)
     monitor_thread.join(timeout=5)
 
 
@@ -1222,9 +1223,8 @@ def main() -> None:
             name="radmin-monitor",
         )
         monitor_thread.start()
-        status_window.show()
-        if status_window._thread:
-            status_window._thread.join()
+        status_window.show(close_hides=False)
+        status_window.wait_closed()
         stop_event.set()
         monitor_thread.join(timeout=5)
         return

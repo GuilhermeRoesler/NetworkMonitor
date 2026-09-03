@@ -13,7 +13,7 @@ namespace nm {
 
 class StatusWindow {
 public:
-    explicit StatusWindow(HWND owner);
+    explicit StatusWindow(HWND owner, bool close_hides);
 
     bool create(HINSTANCE instance);
     void show();
@@ -48,6 +48,7 @@ private:
     MonitorSnapshot snapshot_{};
     bool has_snapshot_{false};
     bool show_hidden_{false};
+    bool close_hides_{true};
     bool drag_tracking_{false};
     bool drag_active_{false};
     POINT drag_start_{};

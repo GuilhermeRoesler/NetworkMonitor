@@ -41,7 +41,8 @@ StateMap check_peers(
     std::vector<Peer>& peers,
     const StateMap& previous,
     bool notifications_enabled,
-    MonitorEventSink* sink = nullptr);
+    MonitorEventSink* sink = nullptr,
+    const std::atomic_bool* stop = nullptr);
 void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink = nullptr);
 bool scan_network(const std::string& network_type);
 void show_status();

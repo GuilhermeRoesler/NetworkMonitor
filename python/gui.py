@@ -59,14 +59,16 @@ class StatusWindow:
         self._drag_start_y: int = 0
         self._drag_active: bool = False
         self._drag_target_ip: str | None = None
+        self._close_hides: bool = True
         self._lock = threading.Lock()
 
     @property
     def is_open(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def show(self) -> None:
+    def show(self, *, close_hides: bool = True) -> None:
         with self._lock:
+            self._close_hides = close_hides
             if self.is_open and self._root is not None:
                 self._root.after(0, self._bring_to_front)
                 return
@@ -76,6 +78,11 @@ class StatusWindow:
     def close(self) -> None:
         if self._root is not None:
             self._root.after(0, self._destroy)
+
+    def wait_closed(self, timeout: float | None = None) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=timeout)
 
     def _bring_to_front(self) -> None:
         if self._root is None:
@@ -88,22 +95,29 @@ class StatusWindow:
         self._cancel_rename()
         if self._refresh_job and self._root is not None:
             self._root.after_cancel(self._refresh_job)
+            self._refresh_job = None
         if self._root is not None:
+            self._root.quit()
             self._root.destroy()
             self._root = None
 
     def _run(self) -> None:
-        self._root = tk.Tk()
-        self._root.title(APP_NAME)
-        self._root.geometry("560x480")
-        self._root.minsize(480, 360)
-        self._root.configure(bg=COLORS["bg"])
-        self._root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self._apply_window_icon()
+        try:
+            self._root = tk.Tk()
+            self._root.title(APP_NAME)
+            self._root.geometry("560x480")
+            self._root.minsize(480, 360)
+            self._root.configure(bg=COLORS["bg"])
+            self._root.protocol("WM_DELETE_WINDOW", self._on_close)
+            self._apply_window_icon()
 
-        self._build_ui()
-        self._refresh_data()
-        self._root.mainloop()
+            self._build_ui()
+            self._refresh_data()
+            self._root.mainloop()
+        finally:
+            self._refresh_job = None
+            self._root = None
+            self._thread = None
 
     def _apply_window_icon(self) -> None:
         assert self._root is not None
@@ -126,11 +140,15 @@ class StatusWindow:
             pass
 
     def _on_close(self) -> None:
-        self._cancel_rename()
-        if self._refresh_job and self._root is not None:
-            self._root.after_cancel(self._refresh_job)
-        if self._root is not None:
-            self._root.withdraw()
+        if self._close_hides:
+            self._cancel_rename()
+            if self._refresh_job and self._root is not None:
+                self._root.after_cancel(self._refresh_job)
+                self._refresh_job = None
+            if self._root is not None:
+                self._root.withdraw()
+            return
+        self._destroy()
 
     def _build_ui(self) -> None:
         assert self._root is not None

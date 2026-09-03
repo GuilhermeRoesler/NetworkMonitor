@@ -27,7 +27,7 @@ int AppController::run(HINSTANCE instance, int ncmdshow) {
         return 1;
     }
 
-    status_window_ = std::make_unique<StatusWindow>(message_window_);
+    status_window_ = std::make_unique<StatusWindow>(message_window_, with_tray_);
     if (!status_window_->create(instance_)) {
         return 1;
     }

@@ -281,7 +281,8 @@ std::set<std::string> skip_ips_for_network(const std::string& network_type, cons
 std::vector<Peer> discover_peers(
     const std::string& local_ip,
     const std::set<std::string>& known_ips,
-    const std::set<std::string>& skip_ips) {
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop) {
     const unsigned base = ip_to_u32(local_ip) & 0xFFFFFF00u;
     std::vector<std::string> candidates;
     candidates.reserve(254);
@@ -303,6 +304,9 @@ std::vector<Peer> discover_peers(
     for (unsigned i = 0; i < workers; ++i) {
         threads.emplace_back([&]() {
             while (true) {
+                if (stop != nullptr && stop->load()) {
+                    break;
+                }
                 const size_t index = next.fetch_add(1);
                 if (index >= candidates.size()) {
                     break;

@@ -76,7 +76,7 @@ void autosize_columns(HWND list) {
 
 }  // namespace
 
-StatusWindow::StatusWindow(HWND owner) : owner_(owner) {}
+StatusWindow::StatusWindow(HWND owner, bool close_hides) : owner_(owner), close_hides_(close_hides) {}
 
 bool StatusWindow::create(HINSTANCE instance) {
     instance_ = instance;
@@ -362,7 +362,13 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
             }
             break;
         case WM_CLOSE:
-            ShowWindow(hwnd_, SW_HIDE);
+            if (close_hides_) {
+                ShowWindow(hwnd_, SW_HIDE);
+                return 0;
+            }
+            // Modo sem bandeja (ex.: --gui): fechar com X deve encerrar o app.
+            PostQuitMessage(0);
+            DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd_, kRefreshTimerId);

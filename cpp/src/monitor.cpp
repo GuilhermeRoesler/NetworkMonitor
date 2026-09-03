@@ -28,7 +28,8 @@ StateMap check_peers(
     std::vector<Peer>& peers,
     const StateMap& previous,
     bool notifications_enabled,
-    MonitorEventSink* sink) {
+    MonitorEventSink* sink,
+    const std::atomic_bool* stop) {
     StateMap current = previous;
     std::vector<Peer*> monitored;
     for (auto& peer : peers) {
@@ -46,6 +47,9 @@ StateMap check_peers(
     for (unsigned i = 0; i < workers; ++i) {
         threads.emplace_back([&]() {
             while (true) {
+                if (stop != nullptr && stop->load()) {
+                    break;
+                }
                 const size_t index = next.fetch_add(1);
                 if (index >= monitored.size()) {
                     break;
@@ -119,7 +123,11 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
 
             if (due || empty) {
                 auto discovered =
-                    discover_peers(*local_ip, known_global, skip_ips_for_network(network.network_type, *local_ip));
+                    discover_peers(
+                        *local_ip,
+                        known_global,
+                        skip_ips_for_network(network.network_type, *local_ip),
+                        &stop);
                 for (auto& peer : discovered) {
                     peer.network_name = network.name;
                     peer.network_type = network.network_type;
@@ -158,7 +166,7 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
         if (visible.empty()) {
             emit_log(sink, "Nenhum peer configurado ou encontrado. Aguardando...");
         } else {
-            state = check_peers(visible, state, config.notifications_enabled, sink);
+            state = check_peers(visible, state, config.notifications_enabled, sink, &stop);
             save_state(state, config);
             int online_count = 0;
             for (const auto& peer : visible) {
