@@ -15,7 +15,7 @@ App **Windows** que monitora peers **Radmin VPN** (`26.*`) e **LAN** (RFC1918) v
 | Camada | Path | Papel |
 |--------|------|--------|
 | Primária | `python/` | Monitor, tray (`pystray`), toast (`winotify`), GUI (`tkinter`), startup |
-| Secundária | `cpp/` | Core CLI (ICMP/`IcmpSendEcho`); **sem** tray/GUI/toast (Fase 1) |
+| Secundária | `cpp/` | Core CLI + UI Win32 (bandeja, toast, painel); sem startup |
 | Config | raiz | `peers.json`, `state.json`, `monitor.log` — compartilhados |
 | CI/CD | `.github/workflows/` | `ci.yml` (PR), `cd.yml` (tags `v*`) |
 
@@ -57,7 +57,7 @@ Shutdown: `stop_event` → fechar GUI → `icon.stop()` → `join(5)`.
 | Schema JSON | `config-schema` | campos em `peers.json` / `state.json` |
 | Monitor Python | `python-monitor` | ping, descoberta, tray, toast, startup, CLI |
 | GUI | `python-gui` | painel tkinter |
-| C++ | `cpp-core` | core CLI / CMake / ICMP |
+| C++ | `cpp-core` | core / CMake / ICMP / UI Win32 |
 | Pipelines | `ci-cd` | workflows, lint, release |
 
 ## Convenções

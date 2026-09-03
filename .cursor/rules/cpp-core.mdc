@@ -1,5 +1,5 @@
 ---
-description: Core C++ (ICMP, CLI, CMake) — leia a skill cpp-core
+description: Core C++ (ICMP, CLI, CMake, UI Win32) — leia a skill cpp-core
 globs: cpp/**/*
 alwaysApply: false
 ---
@@ -10,4 +10,4 @@ Ao alterar `cpp/` (headers, src, CMake, testes CTest):
 
 Leia e siga **`.cursor/skills/cpp-core/SKILL.md`**.
 
-Fase 1 = CLI only (sem tray/GUI/toast). Schema compartilhado → skill `config-schema`.
+Inclui CLI, ICMP, bandeja, toast e painel Win32. Schema compartilhado → skill `config-schema`.

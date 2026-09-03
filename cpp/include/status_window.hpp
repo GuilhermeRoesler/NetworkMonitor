@@ -42,6 +42,7 @@ private:
     HWND check_notifications_{nullptr};
     HWND check_hidden_{nullptr};
     HINSTANCE instance_{nullptr};
+    HICON window_icon_{nullptr};
     HFONT title_font_{nullptr};
     HFONT text_font_{nullptr};
     HFONT summary_font_{nullptr};
@@ -49,9 +50,9 @@ private:
     bool has_snapshot_{false};
     bool show_hidden_{false};
     bool close_hides_{true};
-    bool drag_tracking_{false};
     bool drag_active_{false};
-    POINT drag_start_{};
+    bool pending_refresh_{false};
+    bool labeling_{false};
     std::string drag_ip_;
     std::string context_ip_;
 
@@ -63,11 +64,14 @@ private:
     void build_controls();
     void refresh_view();
     void refresh_labels();
+    bool should_defer_refresh() const;
+    void request_refresh();
     std::vector<DisplayPeer> peers_to_display() const;
     std::optional<std::string> selected_ip() const;
+    std::optional<std::string> action_ip() const;
     void set_selected_ip(const std::string& ip);
     void toggle_notifications();
-    void refresh_now();
+    void refresh_now(bool force_network = false);
     void show_context_menu(POINT screen_point);
     void rename_selected();
     void move_selected_to_top();
@@ -75,10 +79,11 @@ private:
     void show_selected();
     void mute_selected();
     void unmute_selected();
+    POINT map_to_list(LPARAM lparam) const;
     void update_drag_target(LPARAM lparam);
-    void begin_drag_if_needed(LPARAM lparam);
     void finish_drag(LPARAM lparam);
     void clear_drop_highlight();
+    void cleanup_fonts_and_icon();
 };
 
 }  // namespace nm

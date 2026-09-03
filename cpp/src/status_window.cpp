@@ -9,7 +9,7 @@
 #include <uxtheme.h>
 #include <windowsx.h>
 
-#include <memory>
+#include <algorithm>
 
 namespace nm {
 namespace {
@@ -42,8 +42,11 @@ const COLORREF kColorOffline = RGB(207, 34, 46);
 const COLORREF kColorUnknown = RGB(110, 119, 129);
 const COLORREF kColorHidden = RGB(139, 148, 158);
 const COLORREF kColorMutedState = RGB(154, 103, 0);
-const COLORREF kColorDrop = RGB(219, 234, 254);
 const COLORREF kColorStripe = RGB(251, 252, 253);
+constexpr LPARAM kFlagNone = 0;
+constexpr LPARAM kFlagHidden = 1;
+constexpr LPARAM kFlagMuted = 2;
+const wchar_t kMutePrefix[] = L"\xD83D\xDD07 ";
 const wchar_t kFooterHint[] =
     L"Arraste para reordenar · Duplo clique/F2 renomeia · Delete oculta · Clique direito: ocultar ou silenciar";
 const wchar_t kFooterDragging[] = L"Reordenando: solte sobre outro peer ou abaixo da lista para mover ao final";
@@ -59,6 +62,22 @@ std::wstring status_text_for_peer(const Peer& peer, const StateMap& state) {
     return it->second ? L"Online" : L"Offline";
 }
 
+COLORREF status_color(const std::wstring& status, LPARAM flags) {
+    if ((flags & kFlagHidden) != 0 || status == L"Oculto") {
+        return kColorHidden;
+    }
+    if ((flags & kFlagMuted) != 0) {
+        return kColorMutedState;
+    }
+    if (status == L"Online") {
+        return kColorOnline;
+    }
+    if (status == L"Offline") {
+        return kColorOffline;
+    }
+    return kColorUnknown;
+}
+
 void autosize_columns(HWND list) {
     if (list == nullptr) {
         return;
@@ -66,12 +85,20 @@ void autosize_columns(HWND list) {
     RECT rect{};
     GetClientRect(list, &rect);
     const int total = rect.right - rect.left;
-    const int ip_width = 170;
-    const int status_width = 120;
-    const int name_width = (total > (ip_width + status_width + 40)) ? total - ip_width - status_width - 8 : 240;
+    const int ip_width = 150;
+    const int status_width = 110;
+    const int name_width = (total > (ip_width + status_width + 24)) ? total - ip_width - status_width - 4 : 220;
     ListView_SetColumnWidth(list, 0, name_width);
     ListView_SetColumnWidth(list, 1, ip_width);
     ListView_SetColumnWidth(list, 2, status_width);
+}
+
+std::wstring peer_name_without_mute_prefix(std::wstring name) {
+    // 🔇 em UTF-16 = D83D DD07, seguido de espaço.
+    if (name.size() >= 3 && name[0] == 0xD83D && name[1] == 0xDD07 && name[2] == L' ') {
+        return name.substr(3);
+    }
+    return name;
 }
 
 }  // namespace
@@ -85,16 +112,21 @@ bool StatusWindow::create(HINSTANCE instance) {
     icc.dwICC = ICC_LISTVIEW_CLASSES;
     InitCommonControlsEx(&icc);
 
+    window_icon_ =
+        static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE));
+
     WNDCLASSW wc{};
-    wc.lpfnWndProc = &StatusWindow::WndProc;
-    wc.hInstance = instance_;
-    wc.hIcon = static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE));
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(kColorBg);
-    wc.lpszClassName = kStatusWindowClassName;
-    RegisterClassW(&wc);
-    if (wc.hIcon != nullptr) {
-        DestroyIcon(wc.hIcon);
+    if (!GetClassInfoW(instance_, kStatusWindowClassName, &wc)) {
+        wc = {};
+        wc.lpfnWndProc = &StatusWindow::WndProc;
+        wc.hInstance = instance_;
+        wc.hIcon = window_icon_;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = CreateSolidBrush(kColorBg);
+        wc.lpszClassName = kStatusWindowClassName;
+        if (RegisterClassW(&wc) == 0) {
+            return false;
+        }
     }
 
     hwnd_ = CreateWindowExW(
@@ -110,7 +142,15 @@ bool StatusWindow::create(HINSTANCE instance) {
         nullptr,
         instance_,
         this);
-    return hwnd_ != nullptr;
+    if (hwnd_ == nullptr) {
+        return false;
+    }
+
+    if (window_icon_ != nullptr) {
+        SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(window_icon_));
+        SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(window_icon_));
+    }
+    return true;
 }
 
 void StatusWindow::show() {
@@ -135,15 +175,11 @@ HWND StatusWindow::hwnd() const { return hwnd_; }
 void StatusWindow::handle_snapshot(const MonitorSnapshot& snapshot) {
     snapshot_ = snapshot;
     has_snapshot_ = true;
-    if (hwnd_ != nullptr) {
-        refresh_view();
-    }
+    request_refresh();
 }
 
 void StatusWindow::handle_toggle_notifications() {
-    if (hwnd_ != nullptr) {
-        refresh_view();
-    }
+    refresh_now();
 }
 
 LRESULT CALLBACK StatusWindow::WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -168,9 +204,15 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     switch (message) {
         case WM_CREATE:
             build_controls();
-            SetWindowPos(hwnd_, nullptr, 0, 0, 700, 560, SWP_NOMOVE | SWP_NOZORDER);
+            SetWindowPos(hwnd_, nullptr, 0, 0, 640, 520, SWP_NOMOVE | SWP_NOZORDER);
             SetTimer(hwnd_, kRefreshTimerId, kRefreshMs, nullptr);
             return 0;
+        case WM_GETMINMAXINFO: {
+            auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+            info->ptMinTrackSize.x = 520;
+            info->ptMinTrackSize.y = 400;
+            return 0;
+        }
         case WM_SIZE: {
             const int width = LOWORD(lparam);
             const int height = HIWORD(lparam);
@@ -194,14 +236,14 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
                 case kIdRefresh:
-                    refresh_now();
+                    refresh_now(true);
                     return 0;
                 case kIdNotifications:
                     toggle_notifications();
                     return 0;
                 case kIdShowHidden:
                     show_hidden_ = (Button_GetCheck(check_hidden_) == BST_CHECKED);
-                    refresh_view();
+                    request_refresh();
                     return 0;
                 case kMenuRename:
                     rename_selected();
@@ -244,40 +286,23 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
                 if (code == NM_CUSTOMDRAW) {
                     auto* draw = reinterpret_cast<LPNMLVCUSTOMDRAW>(lparam);
                     if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) {
-                        return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYSUBITEMDRAW;
+                        return CDRF_NOTIFYITEMDRAW;
                     }
-                    if (draw->nmcd.dwDrawStage == (CDDS_ITEMPREPAINT | CDDS_SUBITEM)) {
-                        wchar_t ip_buffer[256]{};
+                    if (draw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
                         wchar_t status_buffer[64]{};
-                        ListView_GetItemText(list_, static_cast<int>(draw->nmcd.dwItemSpec), 1, ip_buffer, 255);
                         ListView_GetItemText(list_, static_cast<int>(draw->nmcd.dwItemSpec), 2, status_buffer, 63);
-                        const std::string ip = narrow(ip_buffer);
-                        const auto config = load_config();
-                        const auto peers = config.all_peers();
-                        const auto peer_it =
-                            std::find_if(peers.begin(), peers.end(), [&](const Peer& peer) { return peer.ip == ip; });
-                        const std::wstring status = status_buffer;
+                        LVITEMW item{};
+                        item.mask = LVIF_PARAM;
+                        item.iItem = static_cast<int>(draw->nmcd.dwItemSpec);
+                        ListView_GetItem(list_, &item);
                         const bool selected = (draw->nmcd.uItemState & CDIS_SELECTED) != 0;
                         if (selected) {
                             draw->clrTextBk = GetSysColor(COLOR_HIGHLIGHT);
                             draw->clrText = RGB(255, 255, 255);
                         } else {
-                            draw->clrTextBk = (draw->nmcd.dwItemSpec % 2 == 0) ? kColorCard : kColorStripe;
-                            if (peer_it != peers.end() && peer_it->hidden) {
-                                draw->clrText = kColorHidden;
-                            } else if (peer_it != peers.end() && peer_it->muted && draw->iSubItem == 0) {
-                                draw->clrText = kColorMutedState;
-                            } else if (status == L"Online") {
-                                draw->clrText = kColorOnline;
-                            } else if (status == L"Offline") {
-                                draw->clrText = kColorOffline;
-                            } else if (status == L"Oculto") {
-                                draw->clrText = kColorHidden;
-                            } else if (status == L"Silenciado") {
-                                draw->clrText = kColorMutedState;
-                            } else {
-                                draw->clrText = kColorUnknown;
-                            }
+                            draw->clrTextBk =
+                                (draw->nmcd.dwItemSpec % 2 == 0) ? kColorCard : kColorStripe;
+                            draw->clrText = status_color(status_buffer, item.lParam);
                         }
                         return CDRF_NEWFONT;
                     }
@@ -287,15 +312,21 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
                     return 0;
                 }
                 if (code == LVN_BEGINDRAG) {
-                    auto* drag = reinterpret_cast<NM_LISTVIEW*>(lparam);
+                    auto* drag = reinterpret_cast<NMLISTVIEW*>(lparam);
                     wchar_t ip_buffer[256]{};
                     ListView_GetItemText(list_, drag->iItem, 1, ip_buffer, 255);
                     drag_ip_ = narrow(ip_buffer);
-                    drag_active_ = !drag_ip_.empty();
+                    LVITEMW item{};
+                    item.mask = LVIF_PARAM;
+                    item.iItem = drag->iItem;
+                    ListView_GetItem(list_, &item);
+                    drag_active_ = !drag_ip_.empty() && (item.lParam & kFlagHidden) == 0;
                     if (drag_active_) {
                         SetCapture(hwnd_);
                         SetCursor(LoadCursorW(nullptr, IDC_HAND));
                         SetWindowTextW(footer_, kFooterDragging);
+                    } else {
+                        drag_ip_.clear();
                     }
                     return 0;
                 }
@@ -317,20 +348,40 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
                     }
                 }
                 if (code == LVN_BEGINLABELEDITW) {
-                    return 0;
+                    auto* edit = reinterpret_cast<NMLVDISPINFOW*>(lparam);
+                    wchar_t ip_buffer[256]{};
+                    ListView_GetItemText(list_, edit->item.iItem, 1, ip_buffer, 255);
+                    const std::string ip = narrow(ip_buffer);
+                    const auto config = load_config();
+                    const auto peers = config.all_peers();
+                    const auto it =
+                        std::find_if(peers.begin(), peers.end(), [&](const Peer& peer) { return peer.ip == ip; });
+                    labeling_ = true;
+                    if (it != peers.end()) {
+                        if (HWND edit_hwnd = ListView_GetEditControl(list_)) {
+                            SetWindowTextW(edit_hwnd, widen(it->name).c_str());
+                        }
+                    }
+                    return FALSE;
                 }
                 if (code == LVN_ENDLABELEDITW) {
                     auto* edit = reinterpret_cast<NMLVDISPINFOW*>(lparam);
+                    labeling_ = false;
+                    bool accepted = false;
                     if (edit->item.pszText != nullptr) {
                         const int index = edit->item.iItem;
                         wchar_t ip_buffer[256]{};
                         ListView_GetItemText(list_, index, 1, ip_buffer, 255);
-                        if (update_peer_name(narrow(ip_buffer), narrow(trim_copy(edit->item.pszText)))) {
-                            refresh_now();
-                            return TRUE;
+                        const std::wstring cleaned = peer_name_without_mute_prefix(trim_copy(edit->item.pszText));
+                        if (update_peer_name(narrow(ip_buffer), narrow(cleaned))) {
+                            accepted = true;
                         }
                     }
-                    return FALSE;
+                    if (pending_refresh_ || accepted) {
+                        pending_refresh_ = false;
+                        refresh_now();
+                    }
+                    return accepted ? TRUE : FALSE;
                 }
             }
             break;
@@ -361,29 +412,29 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
                 return 0;
             }
             break;
+        case WM_CAPTURECHANGED:
+            if (drag_active_ && reinterpret_cast<HWND>(lparam) != hwnd_) {
+                clear_drop_highlight();
+                SetWindowTextW(footer_, kFooterHint);
+                drag_active_ = false;
+                drag_ip_.clear();
+                if (pending_refresh_) {
+                    pending_refresh_ = false;
+                    refresh_now();
+                }
+            }
+            return 0;
         case WM_CLOSE:
             if (close_hides_) {
                 ShowWindow(hwnd_, SW_HIDE);
                 return 0;
             }
-            // Modo sem bandeja (ex.: --gui): fechar com X deve encerrar o app.
             PostQuitMessage(0);
             DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd_, kRefreshTimerId);
-            if (title_font_ != nullptr) {
-                DeleteObject(title_font_);
-                title_font_ = nullptr;
-            }
-            if (text_font_ != nullptr) {
-                DeleteObject(text_font_);
-                text_font_ = nullptr;
-            }
-            if (summary_font_ != nullptr) {
-                DeleteObject(summary_font_);
-                summary_font_ = nullptr;
-            }
+            cleanup_fonts_and_icon();
             hwnd_ = nullptr;
             return 0;
         default:
@@ -392,12 +443,31 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     return DefWindowProcW(hwnd_, message, wparam, lparam);
 }
 
+void StatusWindow::cleanup_fonts_and_icon() {
+    if (title_font_ != nullptr) {
+        DeleteObject(title_font_);
+        title_font_ = nullptr;
+    }
+    if (text_font_ != nullptr) {
+        DeleteObject(text_font_);
+        text_font_ = nullptr;
+    }
+    if (summary_font_ != nullptr) {
+        DeleteObject(summary_font_);
+        summary_font_ = nullptr;
+    }
+    if (window_icon_ != nullptr) {
+        DestroyIcon(window_icon_);
+        window_icon_ = nullptr;
+    }
+}
+
 void StatusWindow::build_controls() {
-    title_font_ = CreateFontW(22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+    title_font_ = CreateFontW(22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                               CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    text_font_ = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+    text_font_ = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    summary_font_ = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+    summary_font_ = CreateFontW(16, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                                 CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
     title_ = CreateWindowW(L"STATIC", L"Network Monitor", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd_,
@@ -416,25 +486,23 @@ void StatusWindow::build_controls() {
                       reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdShowHidden)), instance_, nullptr);
     updated_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_RIGHT, 0, 0, 0, 0, hwnd_,
                              reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdUpdated)), instance_, nullptr);
-    footer_ = CreateWindowW(
-        L"STATIC",
-        kFooterHint,
-        WS_CHILD | WS_VISIBLE,
+    footer_ = CreateWindowW(L"STATIC", kFooterHint, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd_,
+                            reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdFooter)), instance_, nullptr);
+
+    list_ = CreateWindowW(
+        WC_LISTVIEWW,
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_EDITLABELS | LVS_SHOWSELALWAYS,
         0,
         0,
         0,
         0,
         hwnd_,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdFooter)),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdList)),
         instance_,
         nullptr);
-
-    list_ = CreateWindowW(WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_EDITLABELS, 0, 0,
-                          0, 0, hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdList)), instance_, nullptr);
     ListView_SetExtendedListViewStyle(
-        list_,
-        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP | LVS_EX_LABELTIP | LVS_EX_BORDERSELECT |
-            LVS_EX_GRIDLINES);
+        list_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP | LVS_EX_LABELTIP);
     SetWindowTheme(list_, L"Explorer", nullptr);
 
     LVCOLUMNW column{};
@@ -442,15 +510,16 @@ void StatusWindow::build_controls() {
     column.cx = 260;
     column.pszText = const_cast<LPWSTR>(L"Nome");
     ListView_InsertColumn(list_, 0, &column);
-    column.cx = 160;
+    column.cx = 150;
     column.pszText = const_cast<LPWSTR>(L"IP");
     ListView_InsertColumn(list_, 1, &column);
-    column.cx = 120;
+    column.cx = 110;
     column.pszText = const_cast<LPWSTR>(L"Status");
     ListView_InsertColumn(list_, 2, &column);
     autosize_columns(list_);
 
-    for (HWND control : {title_, local_ip_, summary_, updated_, footer_, button_refresh_, check_notifications_, check_hidden_}) {
+    for (HWND control :
+         {title_, local_ip_, summary_, updated_, footer_, button_refresh_, check_notifications_, check_hidden_}) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(text_font_), TRUE);
     }
     SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(title_font_), TRUE);
@@ -458,8 +527,27 @@ void StatusWindow::build_controls() {
     SendMessageW(list_, WM_SETFONT, reinterpret_cast<WPARAM>(text_font_), TRUE);
 }
 
+bool StatusWindow::should_defer_refresh() const {
+    return drag_active_ || labeling_ || (list_ != nullptr && ListView_GetEditControl(list_) != nullptr);
+}
+
+void StatusWindow::request_refresh() {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+    if (should_defer_refresh()) {
+        pending_refresh_ = true;
+        return;
+    }
+    refresh_view();
+}
+
 void StatusWindow::refresh_view() {
     if (hwnd_ == nullptr || list_ == nullptr) {
+        return;
+    }
+    if (should_defer_refresh()) {
+        pending_refresh_ = true;
         return;
     }
 
@@ -469,15 +557,17 @@ void StatusWindow::refresh_view() {
     const auto peers = peers_to_display();
     int row = 0;
     for (const auto& entry : peers) {
+        const std::wstring ip_text = widen(entry.peer.ip);
+        const std::wstring status_text = entry.status_text;
         LVITEMW item{};
         item.mask = LVIF_TEXT | LVIF_PARAM;
         item.iItem = row;
         item.iSubItem = 0;
         item.pszText = const_cast<LPWSTR>(entry.display_name.c_str());
-        item.lParam = static_cast<LPARAM>(row);
+        item.lParam = (entry.peer.hidden ? kFlagHidden : kFlagNone) | (entry.peer.muted ? kFlagMuted : kFlagNone);
         ListView_InsertItem(list_, &item);
-        ListView_SetItemText(list_, row, 1, const_cast<LPWSTR>(widen(entry.peer.ip).c_str()));
-        ListView_SetItemText(list_, row, 2, const_cast<LPWSTR>(entry.status_text.c_str()));
+        ListView_SetItemText(list_, row, 1, const_cast<LPWSTR>(ip_text.c_str()));
+        ListView_SetItemText(list_, row, 2, const_cast<LPWSTR>(status_text.c_str()));
         ++row;
     }
 
@@ -486,6 +576,7 @@ void StatusWindow::refresh_view() {
     }
     autosize_columns(list_);
     refresh_labels();
+    pending_refresh_ = false;
 }
 
 void StatusWindow::refresh_labels() {
@@ -508,7 +599,7 @@ void StatusWindow::refresh_labels() {
     if (snapshot_.visible_count == 0 && snapshot_.hidden_count == 0) {
         summary = L"Nenhum peer configurado em peers.json";
     } else {
-        int offline = snapshot_.visible_count - snapshot_.online_count;
+        const int offline = snapshot_.visible_count - snapshot_.online_count;
         summary = std::to_wstring(snapshot_.online_count) + L" online · " + std::to_wstring(offline) + L" offline · " +
                   std::to_wstring(snapshot_.visible_count) + L" visíveis";
         if (snapshot_.hidden_count > 0) {
@@ -521,8 +612,7 @@ void StatusWindow::refresh_labels() {
     SetWindowTextW(summary_, summary.c_str());
     Button_SetCheck(check_notifications_, snapshot_.notifications_enabled ? BST_CHECKED : BST_UNCHECKED);
     Button_SetCheck(check_hidden_, show_hidden_ ? BST_CHECKED : BST_UNCHECKED);
-    const std::wstring updated = L"Atualizado às " + current_time_hhmmss();
-    SetWindowTextW(updated_, updated.c_str());
+    SetWindowTextW(updated_, (L"Atualizado às " + current_time_hhmmss()).c_str());
 }
 
 std::vector<StatusWindow::DisplayPeer> StatusWindow::peers_to_display() const {
@@ -535,7 +625,7 @@ std::vector<StatusWindow::DisplayPeer> StatusWindow::peers_to_display() const {
         entry.status_text = status_text_for_peer(peer, snapshot_.state);
         entry.display_name = widen(peer.name);
         if (peer.muted && !peer.hidden) {
-            entry.display_name = L"\xD83D\xDD07 " + entry.display_name;
+            entry.display_name = std::wstring(kMutePrefix) + entry.display_name;
         }
         result.push_back(std::move(entry));
     }
@@ -550,6 +640,13 @@ std::optional<std::string> StatusWindow::selected_ip() const {
     wchar_t buffer[256]{};
     ListView_GetItemText(list_, index, 1, buffer, 255);
     return narrow(buffer);
+}
+
+std::optional<std::string> StatusWindow::action_ip() const {
+    if (!context_ip_.empty()) {
+        return context_ip_;
+    }
+    return selected_ip();
 }
 
 void StatusWindow::set_selected_ip(const std::string& ip) {
@@ -570,15 +667,23 @@ void StatusWindow::toggle_notifications() {
     refresh_now();
 }
 
-void StatusWindow::refresh_now() {
+void StatusWindow::refresh_now(bool force_network) {
     if (hwnd_ == nullptr) {
         return;
     }
+    if (should_defer_refresh()) {
+        pending_refresh_ = true;
+        return;
+    }
+
     const auto config = load_config();
     snapshot_.peers = config.all_peers();
     snapshot_.state = load_state();
-    snapshot_.radmin_ip = get_radmin_ip().value_or("");
-    snapshot_.lan_ip = get_lan_ip().value_or("");
+    if (force_network || !has_snapshot_) {
+        snapshot_.radmin_ip = get_radmin_ip().value_or("");
+        snapshot_.lan_ip = get_lan_ip().value_or("");
+        has_snapshot_ = true;
+    }
     snapshot_.visible_count = static_cast<int>(config.visible_peers().size());
     snapshot_.hidden_count = static_cast<int>(config.hidden_peers().size());
     snapshot_.notifications_enabled = config.notifications_enabled;
@@ -593,6 +698,17 @@ void StatusWindow::refresh_now() {
 }
 
 void StatusWindow::show_context_menu(POINT screen_point) {
+    // Seleciona o item sob o cursor quando o clique direito não veio de seleção prévia.
+    POINT client = screen_point;
+    ScreenToClient(list_, &client);
+    LVHITTESTINFO hit{};
+    hit.pt = client;
+    const int hit_index = ListView_HitTest(list_, &hit);
+    if (hit_index >= 0) {
+        ListView_SetItemState(list_, -1, 0, LVIS_SELECTED);
+        ListView_SetItemState(list_, hit_index, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    }
+
     const auto ip = selected_ip();
     if (!ip.has_value()) {
         return;
@@ -633,7 +749,7 @@ void StatusWindow::rename_selected() {
 }
 
 void StatusWindow::move_selected_to_top() {
-    const auto ip = selected_ip();
+    const auto ip = action_ip();
     if (!ip.has_value()) {
         return;
     }
@@ -642,6 +758,7 @@ void StatusWindow::move_selected_to_top() {
     for (const auto& peer : peers) {
         if (peer.ip != *ip) {
             if (move_peer(*ip, peer.ip)) {
+                context_ip_.clear();
                 refresh_now();
             }
             return;
@@ -650,47 +767,57 @@ void StatusWindow::move_selected_to_top() {
 }
 
 void StatusWindow::hide_selected() {
-    const auto ip = selected_ip();
+    const auto ip = action_ip();
     if (ip.has_value() && set_peer_hidden(*ip, true)) {
+        context_ip_.clear();
         refresh_now();
     }
 }
 
 void StatusWindow::show_selected() {
-    if (!context_ip_.empty() && set_peer_hidden(context_ip_, false)) {
+    const auto ip = action_ip();
+    if (ip.has_value() && set_peer_hidden(*ip, false)) {
+        context_ip_.clear();
         refresh_now();
     }
 }
 
 void StatusWindow::mute_selected() {
-    const auto ip = selected_ip();
+    const auto ip = action_ip();
     if (ip.has_value() && set_peer_muted(*ip, true)) {
+        context_ip_.clear();
         refresh_now();
     }
 }
 
 void StatusWindow::unmute_selected() {
-    if (!context_ip_.empty() && set_peer_muted(context_ip_, false)) {
+    const auto ip = action_ip();
+    if (ip.has_value() && set_peer_muted(*ip, false)) {
+        context_ip_.clear();
         refresh_now();
     }
+}
+
+POINT StatusWindow::map_to_list(LPARAM lparam) const {
+    // Com SetCapture(hwnd_), as coords de WM_MOUSEMOVE/UP são relativas à janela-pai.
+    POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    ClientToScreen(hwnd_, &point);
+    ScreenToClient(list_, &point);
+    return point;
 }
 
 void StatusWindow::update_drag_target(LPARAM lparam) {
     if (list_ == nullptr) {
         return;
     }
-    POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-    ScreenToClient(list_, &point);
     LVHITTESTINFO hit{};
-    hit.pt = point;
+    hit.pt = map_to_list(lparam);
     const int index = ListView_HitTest(list_, &hit);
     ListView_SetItemState(list_, -1, 0, LVIS_DROPHILITED);
     if (index >= 0) {
         ListView_SetItemState(list_, index, LVIS_DROPHILITED, LVIS_DROPHILITED);
     }
 }
-
-void StatusWindow::begin_drag_if_needed(LPARAM lparam) { (void)lparam; }
 
 void StatusWindow::finish_drag(LPARAM lparam) {
     if (list_ == nullptr) {
@@ -699,10 +826,8 @@ void StatusWindow::finish_drag(LPARAM lparam) {
         return;
     }
 
-    POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-    ScreenToClient(list_, &point);
     LVHITTESTINFO hit{};
-    hit.pt = point;
+    hit.pt = map_to_list(lparam);
     const int index = ListView_HitTest(list_, &hit);
 
     bool changed = false;
@@ -723,7 +848,8 @@ void StatusWindow::finish_drag(LPARAM lparam) {
     SetWindowTextW(footer_, kFooterHint);
     drag_active_ = false;
     drag_ip_.clear();
-    if (changed) {
+    if (changed || pending_refresh_) {
+        pending_refresh_ = false;
         refresh_now();
     }
 }

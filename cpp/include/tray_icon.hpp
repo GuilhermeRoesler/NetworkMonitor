@@ -15,6 +15,8 @@ public:
 
 private:
     HWND owner_{nullptr};
+    HICON icon_{nullptr};
+    bool owns_icon_{false};
     UINT callback_message_{WM_APP + 1};
     bool created_{false};
 };

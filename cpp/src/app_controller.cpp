@@ -58,10 +58,8 @@ void AppController::on_peer_transition(const PeerTransitionEvent& event) {
 }
 
 void AppController::on_peer_discovered(const PeerDiscoveredEvent& event) {
-    auto* snapshot = new MonitorSnapshot;
-    *snapshot = MonitorSnapshot{};
-    snapshot->peers.push_back(event.peer);
-    post_message_if_window(message_window_, kMsgSnapshot, 1, reinterpret_cast<LPARAM>(snapshot));
+    (void)event;
+    // O próximo on_snapshot do loop já atualiza o painel com a lista completa.
 }
 
 void AppController::on_snapshot(const MonitorSnapshot& snapshot) {
@@ -123,7 +121,7 @@ LRESULT AppController::handle_message(UINT message, WPARAM wparam, LPARAM lparam
         }
         case kMsgSnapshot: {
             std::unique_ptr<MonitorSnapshot> payload(reinterpret_cast<MonitorSnapshot*>(lparam));
-            if (status_window_ != nullptr && wparam == 0) {
+            if (status_window_ != nullptr) {
                 status_window_->handle_snapshot(*payload);
             }
             return 0;

@@ -23,16 +23,17 @@ bool TrayIcon::create(HWND owner) {
     data.uID = kTrayIconId;
     data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     data.uCallbackMessage = callback_message_;
-    data.hIcon = static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE));
-    if (data.hIcon == nullptr) {
-        data.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    icon_ = static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 16, 16, LR_LOADFROMFILE));
+    if (icon_ == nullptr) {
+        icon_ = LoadIconW(nullptr, IDI_APPLICATION);
+        owns_icon_ = false;
+    } else {
+        owns_icon_ = true;
     }
+    data.hIcon = icon_;
     wcscpy_s(data.szTip, L"Network Monitor");
 
     created_ = Shell_NotifyIconW(NIM_ADD, &data) == TRUE;
-    if (data.hIcon != nullptr) {
-        DestroyIcon(data.hIcon);
-    }
     return created_;
 }
 
@@ -46,6 +47,11 @@ void TrayIcon::destroy() {
     data.uID = kTrayIconId;
     Shell_NotifyIconW(NIM_DELETE, &data);
     created_ = false;
+    if (owns_icon_ && icon_ != nullptr) {
+        DestroyIcon(icon_);
+    }
+    icon_ = nullptr;
+    owns_icon_ = false;
 }
 
 void TrayIcon::show_context_menu() {

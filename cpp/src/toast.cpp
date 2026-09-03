@@ -5,10 +5,10 @@
 
 #include <windows.data.xml.dom.h>
 #include <windows.ui.notifications.h>
-#include <roapi.h>
-#include <shlobj.h>
 #include <propkey.h>
 #include <propvarutil.h>
+#include <roapi.h>
+#include <shlobj.h>
 
 #include <wrl/client.h>
 
@@ -25,16 +25,57 @@ using ABI::Windows::UI::Notifications::IToastNotifier;
 
 constexpr wchar_t kAppId[] = L"Gui.NetworkMonitor.Cpp";
 
+class HString {
+public:
+    HString() = default;
+    explicit HString(const wchar_t* value) {
+        WindowsCreateString(value, static_cast<UINT32>(wcslen(value)), &handle_);
+    }
+    explicit HString(const std::wstring& value) {
+        WindowsCreateString(value.c_str(), static_cast<UINT32>(value.size()), &handle_);
+    }
+    ~HString() {
+        if (handle_ != nullptr) {
+            WindowsDeleteString(handle_);
+        }
+    }
+    HString(const HString&) = delete;
+    HString& operator=(const HString&) = delete;
+    HSTRING get() const { return handle_; }
+
+private:
+    HSTRING handle_{nullptr};
+};
+
 std::wstring shortcut_path() {
     wchar_t programs_path[MAX_PATH]{};
-    SHGetFolderPathW(nullptr, CSIDL_PROGRAMS, nullptr, SHGFP_TYPE_CURRENT, programs_path);
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROGRAMS, nullptr, SHGFP_TYPE_CURRENT, programs_path))) {
+        return {};
+    }
     return std::wstring(programs_path) + L"\\Network Monitor C++.lnk";
+}
+
+std::wstring current_exe_path() {
+    wchar_t buffer[MAX_PATH]{};
+    const DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return {};
+    }
+    return buffer;
 }
 
 HRESULT create_shortcut_if_missing() {
     const std::wstring path = shortcut_path();
+    if (path.empty()) {
+        return E_FAIL;
+    }
     if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return S_OK;
+    }
+
+    const std::wstring exe = current_exe_path();
+    if (exe.empty()) {
+        return E_FAIL;
     }
 
     ComPtr<IShellLinkW> link;
@@ -43,10 +84,7 @@ HRESULT create_shortcut_if_missing() {
         return hr;
     }
 
-    const auto exe_path = resolve_app_dir() / "cpp" / "build" / "bin" / "NetworkMonitorCpp.exe";
-    const auto fallback = resolve_app_dir() / "NetworkMonitorCpp.exe";
-    const auto actual_path = std::filesystem::exists(exe_path) ? exe_path : fallback;
-    link->SetPath(actual_path.c_str());
+    link->SetPath(exe.c_str());
     link->SetWorkingDirectory(resolve_app_dir().c_str());
     link->SetIconLocation(icon_ico_path().c_str(), 0);
 
@@ -81,7 +119,8 @@ HRESULT create_shortcut_if_missing() {
 }  // namespace
 
 ToastManager::ToastManager() : app_id_(kAppId) {
-    initialized_ = SUCCEEDED(RoInitialize(RO_INIT_MULTITHREADED)) || GetLastError() == S_FALSE;
+    const HRESULT hr = RoInitialize(RO_INIT_SINGLETHREADED);
+    initialized_ = SUCCEEDED(hr) || hr == S_FALSE || hr == RPC_E_CHANGED_MODE;
     if (initialized_) {
         ensure_shortcut();
     }
@@ -98,17 +137,6 @@ void ToastManager::show_transition(const PeerTransitionEvent& event) {
         return;
     }
 
-    HSTRING manager_string{};
-    HSTRING app_id_string{};
-    HSTRING notification_string{};
-    HSTRING xml_string{};
-    ComPtr<IToastNotificationManagerStatics> manager;
-    ComPtr<IToastNotifier> notifier;
-    ComPtr<ABI::Windows::Data::Xml::Dom::IXmlDocument> xml;
-    ComPtr<IXmlDocumentIO> xml_io;
-    ComPtr<IToastNotificationFactory> factory;
-    ComPtr<IToastNotification> toast;
-
     const std::wstring title = escape_xml(
         L"[" + widen(event.peer.network_name) + L"] " + widen(event.peer.name) + L" " +
         std::wstring(event.online ? L"ficou online" : L"ficou offline"));
@@ -117,40 +145,45 @@ void ToastManager::show_transition(const PeerTransitionEvent& event) {
         L"<toast><visual><binding template=\"ToastGeneric\"><text>" + title + L"</text><text>" + message +
         L"</text></binding></visual></toast>";
 
-    WindowsCreateString(RuntimeClass_Windows_UI_Notifications_ToastNotificationManager,
-                        static_cast<UINT32>(wcslen(RuntimeClass_Windows_UI_Notifications_ToastNotificationManager)),
-                        &manager_string);
-    RoGetActivationFactory(manager_string, IID_PPV_ARGS(&manager));
-    WindowsCreateString(app_id_.c_str(), static_cast<UINT32>(app_id_.size()), &app_id_string);
-    manager->CreateToastNotifierWithId(app_id_string, &notifier);
+    HString manager_name(RuntimeClass_Windows_UI_Notifications_ToastNotificationManager);
+    HString app_id(app_id_);
+    HString xml_name(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument);
+    HString toast_name(RuntimeClass_Windows_UI_Notifications_ToastNotification);
+    HString xml_payload_hs(xml_payload);
 
-    WindowsCreateString(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument,
-                        static_cast<UINT32>(wcslen(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument)), &xml_string);
-    RoActivateInstance(xml_string, &xml);
-    xml.As(&xml_io);
+    ComPtr<IToastNotificationManagerStatics> manager;
+    ComPtr<IToastNotifier> notifier;
+    ComPtr<IXmlDocument> xml;
+    ComPtr<IXmlDocumentIO> xml_io;
+    ComPtr<IToastNotificationFactory> factory;
+    ComPtr<IToastNotification> toast;
 
-    WindowsCreateString(xml_payload.c_str(), static_cast<UINT32>(xml_payload.size()), &notification_string);
-    xml_io->LoadXml(notification_string);
-
-    HSTRING toast_class{};
-    WindowsCreateString(RuntimeClass_Windows_UI_Notifications_ToastNotification,
-                        static_cast<UINT32>(wcslen(RuntimeClass_Windows_UI_Notifications_ToastNotification)),
-                        &toast_class);
-    RoGetActivationFactory(toast_class, IID_PPV_ARGS(&factory));
-    factory->CreateToastNotification(xml.Get(), &toast);
+    if (FAILED(RoGetActivationFactory(manager_name.get(), IID_PPV_ARGS(&manager)))) {
+        return;
+    }
+    if (FAILED(manager->CreateToastNotifierWithId(app_id.get(), &notifier)) || notifier == nullptr) {
+        return;
+    }
+    if (FAILED(RoActivateInstance(xml_name.get(), &xml)) || xml == nullptr) {
+        return;
+    }
+    if (FAILED(xml.As(&xml_io)) || xml_io == nullptr) {
+        return;
+    }
+    if (FAILED(xml_io->LoadXml(xml_payload_hs.get()))) {
+        return;
+    }
+    if (FAILED(RoGetActivationFactory(toast_name.get(), IID_PPV_ARGS(&factory))) || factory == nullptr) {
+        return;
+    }
+    if (FAILED(factory->CreateToastNotification(xml.Get(), &toast)) || toast == nullptr) {
+        return;
+    }
     notifier->Show(toast.Get());
-
-    WindowsDeleteString(toast_class);
-    WindowsDeleteString(notification_string);
-    WindowsDeleteString(xml_string);
-    WindowsDeleteString(app_id_string);
-    WindowsDeleteString(manager_string);
 }
 
 void ToastManager::ensure_shortcut() {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     create_shortcut_if_missing();
-    CoUninitialize();
 }
 
 }  // namespace nm

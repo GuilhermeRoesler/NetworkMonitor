@@ -58,9 +58,8 @@ Por peer: `hidden` (não monitora) e `muted` (monitora sem notificar).
 
 Na versão C++ com UI Win32:
 
-- sem flags: inicia monitor + bandeja
-- `--gui`: inicia monitor + painel, sem bandeja
-- fechar a janela no `X` apenas oculta o painel
+- sem flags: inicia monitor + bandeja (fechar o painel com X apenas oculta)
+- `--gui`: inicia monitor + painel, sem bandeja (fechar com X encerra o app)
 - o encerramento completo do modo bandeja acontece pelo menu `Encerrar`
 - os toasts seguem `notifications_enabled`, `muted` e peers ocultos
 
