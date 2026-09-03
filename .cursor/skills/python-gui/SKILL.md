@@ -26,6 +26,8 @@ description: >-
 
 Fechar janela = `withdraw` (não mata o monitor). Encerrar vem da bandeja.
 
+Ícone da janela: `WM_SETICON` com tamanhos físicos (`GetDpiForMonitor`), não `iconbitmap` no `.ico` (o Windows escolhe o frame 16px).
+
 ## Thread-safety
 
 - Mutações de widgets só no thread tk (`root.after`)

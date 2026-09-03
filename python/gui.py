@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -61,6 +62,8 @@ class StatusWindow:
         self._drag_target_ip: str | None = None
         self._close_hides: bool = True
         self._lock = threading.Lock()
+        self._win_icon_handles: tuple[int, int] | None = None
+        self._icon_photo: tk.PhotoImage | None = None
 
     @property
     def is_open(self) -> bool:
@@ -116,6 +119,11 @@ class StatusWindow:
                 root.destroy()
             except tk.TclError:
                 pass
+        from main import destroy_win32_icons
+
+        destroy_win32_icons(self._win_icon_handles)
+        self._win_icon_handles = None
+        self._icon_photo = None
 
     def _run(self) -> None:
         try:
@@ -136,24 +144,42 @@ class StatusWindow:
             self._thread = None
 
     def _apply_window_icon(self) -> None:
+        """Evita iconbitmap no .ico: o Windows pega o frame 16px e amplia na DPI."""
         assert self._root is not None
-        from main import ICON_ICO_NAME, ICON_PNG_NAME, resolve_asset_path
+        from main import (
+            ICON_ICO_NAME,
+            ICON_PNG_NAME,
+            resolve_asset_path,
+            set_win32_window_icons,
+        )
 
         ico = resolve_asset_path(ICON_ICO_NAME)
         png = resolve_asset_path(ICON_PNG_NAME)
-        if ico is not None:
+        if ico is not None and sys.platform == "win32":
             try:
-                self._root.iconbitmap(default=str(ico))
+                import ctypes
+
+                self._root.update_idletasks()
+                inner = int(self._root.winfo_id())
+                hwnd = int(ctypes.windll.user32.GetParent(inner) or inner)
+                handles = set_win32_window_icons(hwnd, ico)
+                if handles:
+                    self._win_icon_handles = handles
+                    return
+            except Exception:
+                pass
+        if png is not None:
+            try:
+                self._icon_photo = tk.PhotoImage(file=str(png))
+                self._root.iconphoto(True, self._icon_photo)
                 return
             except tk.TclError:
                 pass
-        if png is None:
-            return
-        try:
-            self._icon_photo = tk.PhotoImage(file=str(png))
-            self._root.iconphoto(True, self._icon_photo)
-        except tk.TclError:
-            pass
+        if ico is not None:
+            try:
+                self._root.iconbitmap(default=str(ico))
+            except tk.TclError:
+                pass
 
     def _on_close(self) -> None:
         if self._close_hides:

@@ -65,7 +65,7 @@ Startup: `pythonw.exe` + `python/main.py --run`, `WorkingDirectory` = raiz. Remo
 Menu: Abrir painel · Notificações (toggle) · Encerrar.  
 Import de `gui` **lazy** (dentro da função) — nunca no top-level de `main.py`.
 
-Ícone: `assets/icon.png` / `assets/icon.ico` via `resolve_asset_path` (tray, toast, PyInstaller `--icon`).
+Ícone tray: `create_tray_icon_image` usa o frame **64px** de `assets/icon.ico` (não 16px — `GetSystemMetrics` sem DPI awareness devolve 16 e o Windows amplia). Toast/build: `icon.png` / `icon.ico` via `resolve_asset_path`.
 
 ## APIs usadas pela GUI
 

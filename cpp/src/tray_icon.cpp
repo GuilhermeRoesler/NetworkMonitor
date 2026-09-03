@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "paths.hpp"
+#include "win32_helpers.hpp"
 
 #include <shellapi.h>
 
@@ -23,7 +24,7 @@ bool TrayIcon::create(HWND owner) {
     data.uID = kTrayIconId;
     data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     data.uCallbackMessage = callback_message_;
-    icon_ = static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 16, 16, LR_LOADFROMFILE));
+    icon_ = load_file_icon(icon_ico_path().wstring(), kTrayIconSize);
     if (icon_ == nullptr) {
         icon_ = LoadIconW(nullptr, IDI_APPLICATION);
         owns_icon_ = false;

@@ -42,7 +42,8 @@ private:
     HWND check_notifications_{nullptr};
     HWND check_hidden_{nullptr};
     HINSTANCE instance_{nullptr};
-    HICON window_icon_{nullptr};
+    HICON window_icon_small_{nullptr};
+    HICON window_icon_big_{nullptr};
     HFONT title_font_{nullptr};
     HFONT text_font_{nullptr};
     HFONT summary_font_{nullptr};

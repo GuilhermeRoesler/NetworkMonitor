@@ -91,4 +91,57 @@ void post_message_if_window(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpara
     }
 }
 
+int snap_icon_size(int pixels) {
+    pixels = (std::max)(kIcoSizes[0], pixels);
+    for (int size : kIcoSizes) {
+        if (size >= pixels) {
+            return size;
+        }
+    }
+    return kIcoSizes[sizeof(kIcoSizes) / sizeof(kIcoSizes[0]) - 1];
+}
+
+int win_effective_dpi() {
+    UINT dpi_x = 96;
+    UINT dpi_y = 96;
+    const HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+    const HMODULE shcore = LoadLibraryW(L"Shcore.dll");
+    if (shcore != nullptr) {
+        using GetDpiForMonitorFn = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
+        const auto get_dpi = reinterpret_cast<GetDpiForMonitorFn>(GetProcAddress(shcore, "GetDpiForMonitor"));
+        if (get_dpi != nullptr && SUCCEEDED(get_dpi(monitor, 0, &dpi_x, &dpi_y)) && dpi_x != 0) {
+            FreeLibrary(shcore);
+            return static_cast<int>(dpi_x);
+        }
+        FreeLibrary(shcore);
+    }
+    return 96;
+}
+
+std::pair<int, int> window_icon_sizes(int dpi) {
+    if (dpi <= 0) {
+        dpi = win_effective_dpi();
+    }
+    const double scale = static_cast<double>(dpi) / 96.0;
+    int small = snap_icon_size((std::max)(32, static_cast<int>(16 * scale + 0.5)));
+    int big = snap_icon_size((std::max)(64, static_cast<int>(32 * scale + 0.5)));
+    if (big <= small) {
+        for (int size : kIcoSizes) {
+            if (size > small) {
+                big = size;
+                break;
+            }
+        }
+    }
+    return {small, big};
+}
+
+HICON load_file_icon(const std::wstring& path, int size) {
+    if (path.empty() || size <= 0) {
+        return nullptr;
+    }
+    return static_cast<HICON>(
+        LoadImageW(nullptr, path.c_str(), IMAGE_ICON, size, size, LR_LOADFROMFILE));
+}
+
 }  // namespace nm

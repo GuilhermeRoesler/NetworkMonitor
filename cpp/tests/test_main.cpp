@@ -6,12 +6,14 @@
 
 void run_network_tests();
 void run_config_tests();
+void run_win32_tests();
 
 int main() {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
     run_network_tests();
     run_config_tests();
+    run_win32_tests();
 
     if (nm::test::failure_count() != 0) {
         std::cerr << nm::test::failure_count() << " falha(s) nos testes C++\n";

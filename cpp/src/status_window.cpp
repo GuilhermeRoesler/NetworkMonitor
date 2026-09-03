@@ -112,19 +112,23 @@ bool StatusWindow::create(HINSTANCE instance) {
     icc.dwICC = ICC_LISTVIEW_CLASSES;
     InitCommonControlsEx(&icc);
 
-    window_icon_ =
-        static_cast<HICON>(LoadImageW(nullptr, icon_ico_path().c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE));
+    const auto icon_sizes = window_icon_sizes();
+    const std::wstring ico = icon_ico_path().wstring();
+    window_icon_small_ = load_file_icon(ico, icon_sizes.first);
+    window_icon_big_ = load_file_icon(ico, icon_sizes.second);
 
-    WNDCLASSW wc{};
-    if (!GetClassInfoW(instance_, kStatusWindowClassName, &wc)) {
+    WNDCLASSEXW wc{};
+    if (GetClassInfoExW(instance_, kStatusWindowClassName, &wc) == 0) {
         wc = {};
+        wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = &StatusWindow::WndProc;
         wc.hInstance = instance_;
-        wc.hIcon = window_icon_;
+        wc.hIcon = window_icon_big_;
+        wc.hIconSm = window_icon_small_;
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         wc.hbrBackground = CreateSolidBrush(kColorBg);
         wc.lpszClassName = kStatusWindowClassName;
-        if (RegisterClassW(&wc) == 0) {
+        if (RegisterClassExW(&wc) == 0) {
             return false;
         }
     }
@@ -146,9 +150,11 @@ bool StatusWindow::create(HINSTANCE instance) {
         return false;
     }
 
-    if (window_icon_ != nullptr) {
-        SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(window_icon_));
-        SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(window_icon_));
+    if (window_icon_big_ != nullptr) {
+        SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(window_icon_big_));
+    }
+    if (window_icon_small_ != nullptr) {
+        SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(window_icon_small_));
     }
     return true;
 }
@@ -461,9 +467,13 @@ void StatusWindow::cleanup_fonts_and_icon() {
         DeleteObject(summary_font_);
         summary_font_ = nullptr;
     }
-    if (window_icon_ != nullptr) {
-        DestroyIcon(window_icon_);
-        window_icon_ = nullptr;
+    if (window_icon_small_ != nullptr) {
+        DestroyIcon(window_icon_small_);
+        window_icon_small_ = nullptr;
+    }
+    if (window_icon_big_ != nullptr) {
+        DestroyIcon(window_icon_big_);
+        window_icon_big_ = nullptr;
     }
 }
 

@@ -22,11 +22,11 @@ target_include_directories(network_monitor_core PUBLIC
 if(MSVC)
   target_compile_definitions(network_monitor_core PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
   target_compile_options(network_monitor_core PRIVATE /W4 /utf-8 /EHsc)
-  target_link_libraries(network_monitor_core PUBLIC iphlpapi ws2_32 advapi32)
+  target_link_libraries(network_monitor_core PUBLIC iphlpapi ws2_32 advapi32 user32)
 else()
   target_compile_definitions(network_monitor_core PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
   target_compile_options(network_monitor_core PRIVATE -Wall -Wextra)
-  target_link_libraries(network_monitor_core PUBLIC iphlpapi ws2_32 advapi32)
+  target_link_libraries(network_monitor_core PUBLIC iphlpapi ws2_32 advapi32 user32)
 endif()
 
 add_executable(NetworkMonitorCpp
@@ -51,6 +51,7 @@ add_executable(NetworkMonitorCppTests
   tests/test_main.cpp
   tests/test_network.cpp
   tests/test_config.cpp
+  tests/test_win32.cpp
 )
 target_include_directories(NetworkMonitorCppTests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/tests"

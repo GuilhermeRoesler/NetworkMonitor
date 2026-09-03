@@ -46,6 +46,8 @@ Atalho: `cpp/run.bat`.
 | `status_window.hpp` | Painel Win32 (ListView, DnD, rename, contexto) |
 | `tray_icon.hpp` / `toast.hpp` | Bandeja e notificações toast |
 
+Ícone tray/janela: `load_file_icon` com frame **64px** na bandeja e **32/64** na janela (`window_icon_sizes`). Não usar 16px — o Windows amplia e pixeliza.
+
 Namespace: `nm`.
 
 ## `APP_DIR` / dados
