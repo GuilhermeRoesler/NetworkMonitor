@@ -3,8 +3,9 @@ name: network-monitor
 description: >-
   Especificação e convenções do Network Monitor — app Windows que monitora peers
   Radmin VPN e LAN via ping, com notificações toast e bandeja do sistema. Use ao
-  modificar, debugar ou estender main.py, gui.py, peers.json, descoberta de peers,
-  notificações, startup do Windows ou qualquer funcionalidade deste repositório.
+  modificar, debugar ou estender python/main.py, python/gui.py, cpp/, peers.json,
+  descoberta de peers, notificações, startup do Windows ou qualquer funcionalidade
+  deste repositório.
 ---
 
 # Network Monitor — Spec do Projeto
@@ -15,24 +16,37 @@ Monitor de peers **Radmin VPN** e **LAN** para Windows. Faz ping periódico, det
 
 | Item | Detalhe |
 |------|---------|
-| Linguagem | Python 3.10+ (`from __future__ import annotations`) |
-| Plataforma | **Windows apenas** — usa `winreg`, `ping -n`, `winotify`, `CREATE_NO_WINDOW` |
-| UI | `tkinter` (painel) + `pystray` (bandeja) |
-| Dependências | `winotify`, `pystray`, `Pillow` — ver `requirements.txt` |
+| Primária | Python 3.10+ em `python/` (`from __future__ import annotations`) |
+| Secundária | C++17 em `cpp/` — core CLI (ICMP/Win32); sem tray/GUI/toast na Fase 1 |
+| Plataforma | **Windows apenas** — `winreg`, `ping -n` / `IcmpSendEcho`, `winotify`, `CREATE_NO_WINDOW` |
+| UI (Python) | `tkinter` (painel) + `pystray` (bandeja) |
+| Dependências Python | `winotify`, `pystray`, `Pillow` — ver `python/requirements.txt` |
+| Config compartilhada | `peers.json` / `state.json` / `monitor.log` na **raiz do repo** |
 | Idioma da UI | Português (mensagens, logs, notificações) |
 
-Não portar para Linux/macOS sem pedido explícito. Não substituir `ping` por bibliotecas externas sem motivo.
+Não portar para Linux/macOS sem pedido explícito. Não substituir ping por bibliotecas externas sem motivo (exceto ICMP nativo no C++).
 
 ## Estrutura de arquivos
 
 ```
-main.py          # Lógica central: config, ping, descoberta, monitor, CLI, bandeja
-gui.py           # StatusWindow (tkinter) — importa funções de main sob demanda
-peers.json       # Configuração (gerado na 1ª execução; gitignored)
-state.json       # Estado online/offline por IP (gitignored)
-monitor.log      # Log persistente (gitignored)
-requirements.txt
+run.bat / run.sh          # atalho → python/
+python/
+  main.py                 # Lógica central: config, ping, descoberta, monitor, CLI, bandeja
+  gui.py                  # StatusWindow (tkinter)
+  requirements.txt
+  build.py                # PyInstaller (onedir)
+  run.bat / run.sh
+cpp/
+  CMakeLists.txt
+  include/                # paths, config, ping, network, monitor + nlohmann_json.hpp
+  src/                    # implementação C++ (core CLI)
+  run.bat / run.sh
+peers.json                # Config (raiz; gitignored; compartilhado Python↔C++)
+state.json
+monitor.log
 ```
+
+**Paths Python:** `SCRIPT_DIR` = `python/`; `APP_DIR` = raiz do repo (ou pasta do `.exe` se `sys.frozen`).
 
 **Regra de imports:** `gui.py` importa de `main` **dentro das funções** (evita import circular). `main.py` importa `gui` só em `run_with_tray()` e `--gui`.
 
@@ -44,9 +58,10 @@ flowchart TB
         CLI[CLI argparse]
         Tray[pystray bandeja]
         GUI[StatusWindow tkinter]
+        CppCLI[NetworkMonitorCpp]
     end
 
-    subgraph core [main.py]
+    subgraph core [python/main.py]
         Loop[run_monitor_loop]
         Process[process_network]
         Check[check_peers]
@@ -66,9 +81,11 @@ flowchart TB
     Check --> Notify[winotify toast]
     Config --> peers.json
     State --> state.json
+    CppCLI --> peers.json
+    CppCLI --> state.json
 ```
 
-### Threads
+### Threads (Python)
 
 - **Monitor** (`run_monitor_loop`): thread daemon `radmin-monitor`
 - **GUI** (`StatusWindow`): thread daemon `radmin-gui` com loop tkinter próprio
@@ -128,7 +145,7 @@ Mapa `{ "ip": true|false }`. Peers ocultos são removidos ao salvar.
 | `radmin` | Registro `Famatech\RadminVPN\1.0` → `IPv4`, fallback `ipconfig` | IPs `26.*` |
 | `lan` | Socket UDP para 8.8.8.8, fallback `ipconfig` | RFC1918, exclui Radmin/APIPA |
 
-Constantes em `main.py`:
+Constantes em `python/main.py` (espelhadas no C++):
 - `RADMIN_GATEWAYS = {"26.0.0.1"}` — ignorado no scan Radmin
 - `LAN_SKIP_PREFIXES = ("169.254.",)` — link-local
 - Sub-rede sempre `/24` via `subnet_for_ip()`
@@ -141,24 +158,33 @@ Constantes em `main.py`:
 4. `check_peers()`: ping paralelo (16 workers); notifica só em **transição** e se não `muted`
 5. `save_state()` após cada ciclo
 
-Ping usa `subprocess` com `ping -n 1 -w {timeout_ms}`; sucesso = `"ttl="` na saída.
+Ping Python: `subprocess` com `ping -n 1 -w {timeout_ms}`; sucesso = `"ttl="` na saída.  
+Ping C++: `IcmpSendEcho`, fallback `ping.exe`.
 
 ## CLI
 
-| Flag | Ação |
-|------|------|
-| *(sem flag)* | Bandeja + monitor em background |
-| `--run` | Só loop de monitor (startup do Windows) |
-| `--gui` | Monitor + painel tkinter |
-| `--scan` | Scan único sub-rede Radmin |
-| `--scan-lan` | Scan único LAN |
-| `--scan-all` | Ambos |
-| `--status` | Status no terminal |
-| `--install` / `--uninstall` | Atalho `Network Monitor.lnk` em `%APPDATA%\...\Startup` (`shell:startup`) |
+| Flag | Python | C++ |
+|------|--------|-----|
+| *(sem flag)* | Bandeja + monitor | Loop no console |
+| `--run` | Só loop de monitor | Loop no console |
+| `--gui` | Monitor + painel | — |
+| `--scan` / `--scan-lan` / `--scan-all` | Sim | Sim |
+| `--status` | Sim | Sim |
+| `--install` / `--uninstall` | Startup | — |
 
-Startup usa `pythonw.exe` + `--run`. `--install` remove entradas legadas no registro `HKCU\...\Run` (`RadminMonitor`) e VBS `RadminMonitor.vbs`.
+Startup Python: `pythonw.exe` + `python/main.py --run`, `WorkingDirectory` = raiz do repo. Com PyInstaller: o próprio `.exe --run`.
 
-## GUI (`gui.py`)
+## C++ (Fase 1)
+
+- Core: config JSON, ping, descoberta, loop, CLI
+- Sem bandeja, toast ou painel (usar Python para isso)
+- Build: `cmake -S cpp -B cpp/build && cmake --build cpp/build --config Release`
+- Exe: `cpp/build/bin/NetworkMonitorCpp.exe`
+- Resolve `APP_DIR` subindo até achar `python/main.py` + `cpp/CMakeLists.txt` ou `peers.json`
+
+Ao adicionar campo em `peers.json`, atualizar **Python e C++**.
+
+## GUI (`python/gui.py`)
 
 - `StatusWindow`: Treeview com drag-and-drop para reordenar peers
 - Refresh a cada 3s (`REFRESH_MS`); lê `load_config()` + `load_state()`
@@ -171,7 +197,7 @@ Singleton: `status_window = StatusWindow()`.
 ## Convenções de código
 
 1. **Escopo mínimo** — alterações focadas; não refatorar sem pedido
-2. **Persistência JSON** — sempre `indent=2`, `ensure_ascii=False`; ler → modificar → escrever atômico no mesmo fluxo
+2. **Persistência JSON** — sempre `indent=2`, `ensure_ascii=False` (Python); C++ usa `dump(2)`; ler → modificar → escrever no mesmo fluxo
 3. **Logging** — `logging.info` para eventos de usuário; `logging.debug` para supressão de notificações
 4. **Subprocess Windows** — `creationflags=subprocess.CREATE_NO_WINDOW` em comandos ping/ipconfig
 5. **Tipagem** — dataclasses + type hints; `bool | None` para estado desconhecido
@@ -182,37 +208,40 @@ Singleton: `status_window = StatusWindow()`.
 
 | Pedido | Onde editar |
 |--------|-------------|
-| Novo campo em peer/rede | `Peer`/`NetworkConfig`, `load_config()`, funções `set_*`/`update_*`, GUI columns |
-| Nova rede (tipo) | `get_local_ip()`, `skip_ips_for_network()`, `save_default_config()`, parser se CLI novo |
+| Novo campo em peer/rede | `python/main.py` + `python/gui.py` + `cpp` (`config`/`monitor`) |
+| Nova rede (tipo) | `get_local_ip()`, `skip_ips_for_network()`, `save_default_config()` (ambos lados) |
 | Alterar intervalo padrão | `save_default_config()` + defaults em `load_config()` |
-| Nova notificação | `notify()` ou `check_peers()` |
-| Item de menu bandeja | `run_with_tray()` menu `pystray.Menu` |
-| Nova ação na GUI | método em `StatusWindow` + callback para função em `main.py` |
+| Nova notificação | `notify()` / `check_peers()` em Python |
+| Item de menu bandeja | `run_with_tray()` em `python/main.py` |
+| Nova ação na GUI | `StatusWindow` + função em `python/main.py` |
+| Core C++ / CLI nativa | `cpp/src/*`, `cpp/include/*` |
 
 ## Armadilhas conhecidas
 
 - **Import circular:** nunca importar `gui` no top-level de `main.py` (exceto lazy dentro de funções)
 - **Peers ocultos:** excluídos de `check_peers` monitorados e de `save_state`
-- **Peers silenciados:** ainda aparecem online/offline; só suprimem toast
+- **Peers silenciados:** ainda aparecem online/offline; só suprimem toast (Python)
 - **Descoberta duplicada:** `known_global_ips` evita re-adicionar IPs já em outra rede
 - **Edição na GUI durante refresh:** `_refresh_data` adia refresh se `_edit_entry` ou drag ativo
 - **Arquivos gitignored:** `peers.json`, `state.json`, `monitor.log` — não commitar
+- **Config na raiz:** não gravar JSON dentro de `python/` ou `cpp/build/`
 
 ## Execução local
 
 ```bash
-pip install -r requirements.txt
-python main.py              # bandeja (modo normal)
-python main.py --status     # diagnóstico rápido
-python main.py --scan-all   # popular peers.json
+pip install -r python/requirements.txt
+./run.bat                     # ou: python/run.bat
+python/run.bat --status
+python/run.bat --scan-all
+cpp/run.bat --status          # compila se necessário
 ```
 
-Para debug do loop sem bandeja: `python main.py --run` (logs em `monitor.log`).
+Para debug do loop sem bandeja: `python/run.bat --run` (logs em `monitor.log` na raiz).
 
 ## Checklist antes de entregar mudanças
 
-- [ ] Funciona só no Windows (sem quebrar APIs winreg/subprocess)
-- [ ] `peers.json` / `state.json` permanecem compatíveis com configs existentes
+- [ ] Funciona só no Windows (sem quebrar APIs winreg/subprocess/ICMP)
+- [ ] `peers.json` / `state.json` na raiz permanecem compatíveis (Python **e** C++ se o schema mudou)
 - [ ] GUI continua thread-safe (callbacks via `root.after`)
 - [ ] Textos em português
 - [ ] Sem dependências novas desnecessárias

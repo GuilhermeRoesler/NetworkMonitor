@@ -2,76 +2,103 @@
 
 Monitor de peers **Radmin VPN** e **rede local (LAN)** para Windows. Verifica periodicamente quem está online ou offline via ping, descobre dispositivos na sub-rede e envia notificações toast quando o status muda.
 
+## Estrutura
+
+```
+NetworkMonitor/
+├── run.bat / run.sh   # atalho → versão Python
+├── python/            # versão primária (tkinter + pystray + winotify)
+├── cpp/               # versão secundária — core CLI (ICMP / Win32)
+├── peers.json         # config compartilhada (gerada na 1ª execução)
+├── state.json         # estado online/offline (compartilhado)
+└── monitor.log
+```
+
+As duas versões leem/escrevem os **mesmos** `peers.json` e `state.json` na raiz do repositório.
+
+## Executar
+
+Na raiz (Python por padrão):
+
+```powershell
+.\run.bat
+```
+
+Direto em cada versão:
+
+```powershell
+.\python\run.bat
+.\python\run.bat --status
+.\cpp\run.bat --status      # compila se o .exe não existir
+.\cpp\run.bat --scan-all
+```
+
 ## Funcionalidades
 
-- Monitoramento contínuo de peers Radmin VPN (`26.*`) e LAN (RFC1918)
-- Notificações Windows quando um peer fica online ou offline
-- Descoberta automática de peers na sub-rede
-- Ícone na bandeja do sistema com menu rápido
-- Painel gráfico para ver status, renomear, reordenar, ocultar e silenciar peers
-- Inicialização automática com o Windows (opcional)
+| Recurso | Python | C++ (Fase 1) |
+|---------|--------|--------------|
+| Ping / descoberta / loop | Sim | Sim |
+| `peers.json` / `state.json` | Sim | Sim |
+| CLI (`--status`, `--scan*`, `--run`) | Sim | Sim |
+| Notificações toast | Sim | Não (log no console) |
+| Bandeja + painel tkinter | Sim | Não |
+| Startup do Windows | Sim | Não |
 
-## Requisitos
+## Python (primária)
 
-- Windows 10 ou superior
-- Python 3.10+
-- [Radmin VPN](https://www.radmin-vpn.com/) (para monitorar a rede Radmin)
+Requisitos: Windows · Python 3.10+
 
-## Instalação
-
-```bash
-git clone <url-do-repositorio>
-cd "Network Monitor"
+```powershell
+cd python
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-Na primeira execução, o arquivo `peers.json` é criado automaticamente com duas redes padrão: **Radmin VPN** e **Rede Local (LAN)**.
-
-## Uso rápido
-
-```bash
-# Modo normal — ícone na bandeja + monitor em background
 python main.py
-
-# Escanear peers online na sub-rede (Radmin e LAN)
-python main.py --scan-all
-
-# Ver status no terminal
-python main.py --status
 ```
 
-### Comandos disponíveis
+### Build do executável
+
+```powershell
+cd python
+pip install pyinstaller
+python build.py
+```
+
+O pacote sai em `python/dist/NetworkMonitor/`. Copie `peers.json` para a pasta do `.exe` se quiser reutilizar a config.
+
+## C++ (secundária — core)
+
+C++17 · CMake · Win32 (ICMP via `IcmpSendEcho`). Sem tray/GUI nesta fase.
+
+```powershell
+cmake -S cpp -B cpp/build
+cmake --build cpp/build --config Release
+.\cpp\build\bin\NetworkMonitorCpp.exe --status
+```
+
+Ou simplesmente `.\cpp\run.bat --status`.
+
+## Comandos CLI (ambas as versões)
 
 | Comando | Descrição |
 |---------|-----------|
-| `python main.py` | Inicia o monitor com ícone na bandeja |
-| `python main.py --gui` | Abre o painel gráfico junto com o monitor |
-| `python main.py --run` | Executa só o loop de monitoramento (sem bandeja) |
-| `python main.py --scan` | Escaneia a sub-rede Radmin uma vez |
-| `python main.py --scan-lan` | Escaneia a sub-rede LAN uma vez |
-| `python main.py --scan-all` | Escaneia Radmin e LAN |
-| `python main.py --status` | Mostra IPs locais e status dos peers |
-| `python main.py --install` | Cria atalho na pasta Startup do Windows |
-| `python main.py --uninstall` | Remove o atalho da pasta Startup do Windows |
+| *(sem flag)* / `--run` | Loop de monitoramento |
+| `--scan` | Escaneia a sub-rede Radmin |
+| `--scan-lan` | Escaneia a sub-rede LAN |
+| `--scan-all` | Escaneia Radmin e LAN |
+| `--status` | Mostra IPs locais e status dos peers |
 
-## Painel gráfico
+Só na versão Python:
 
-Clique duas vezes no ícone da bandeja ou use **Abrir painel** no menu de contexto.
-
-No painel você pode:
-
-- Ver status em tempo real (online, offline, oculto)
-- Renomear peers (duplo-clique ou F2)
-- Reordenar peers arrastando na lista
-- Ocultar peers que não deseja monitorar
-- Silenciar notificações de peers específicos
-- Pausar todas as notificações
-
-O painel atualiza automaticamente a cada 3 segundos.
+| Comando | Descrição |
+|---------|-----------|
+| *(sem flag)* | Ícone na bandeja + monitor |
+| `--gui` | Monitor + painel gráfico |
+| `--install` / `--uninstall` | Atalho na pasta Startup |
 
 ## Configuração (`peers.json`)
 
-Arquivo gerado na pasta do projeto. Exemplo:
+Arquivo na **raiz do repo** (compartilhado). Exemplo:
 
 ```json
 {
@@ -101,43 +128,11 @@ Arquivo gerado na pasta do projeto. Exemplo:
 }
 ```
 
-| Campo | Descrição |
-|-------|-----------|
-| `interval_seconds` | Intervalo entre verificações de ping (padrão: 15s) |
-| `scan_interval_seconds` | Intervalo entre scans de descoberta (padrão: 300s) |
-| `auto_discover` | Descobre peers automaticamente na sub-rede |
-| `notifications_enabled` | Ativa ou pausa notificações globalmente |
-| `peer_order` | Ordem dos peers no painel |
-| `networks[].type` | `"radmin"` ou `"lan"` |
-| `networks[].enabled` | Habilita ou desabilita a rede |
-| `peers[].hidden` | Peer oculto — não é monitorado |
-| `peers[].muted` | Peer monitorado, mas sem notificações |
+## Stack
 
-Peers também podem ser gerenciados pelo painel gráfico; as alterações são salvas em `peers.json`.
+- **Primária:** Python · tkinter · pystray · winotify · Pillow · (opcional) PyInstaller
+- **Secundária:** C++17 · CMake · Win32 / ICMP · nlohmann/json (header vendored)
 
-## Inicialização com o Windows
+## Licença
 
-```bash
-python main.py --install
-```
-
-Cria o atalho `Network Monitor.lnk` em `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` (acessível via `shell:startup` no Explorer), executando `pythonw.exe` sem janela de terminal. Instalações antigas no registro ou via VBS são removidas automaticamente. Para remover:
-
-```bash
-python main.py --uninstall
-```
-
-## Estrutura do projeto
-
-```
-main.py           # Monitor, CLI, notificações e bandeja
-gui.py            # Painel gráfico (tkinter)
-requirements.txt  # Dependências Python
-peers.json        # Configuração (gerado automaticamente)
-state.json        # Estado online/offline por IP
-monitor.log       # Log de execução
-```
-
-## Logs
-
-Eventos são registrados em `monitor.log` na pasta do projeto. Útil para diagnosticar peers que não respondem ao ping ou redes não detectadas.
+Uso pessoal. Consulte o repositório para detalhes de distribuição.

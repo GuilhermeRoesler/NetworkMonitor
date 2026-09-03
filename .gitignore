@@ -1,6 +1,17 @@
 __pycache__/
 *.pyc
+*.pyo
 
+# Runtime data (shared at repo root)
 state.json
 peers.json
 monitor.log
+
+# Python packaging / venv
+python/venv/
+python/build/
+python/dist/
+python/*.spec
+
+# C++ build
+cpp/build/

@@ -26,11 +26,21 @@ try:
     import pystray
     from winotify import Notification, audio
 except ImportError:
-    print("Dependência ausente. Execute: pip install -r requirements.txt")
+    print("Dependência ausente. Execute: pip install -r python/requirements.txt")
     sys.exit(1)
 
 APP_NAME = "Network Monitor"
-APP_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def resolve_app_dir() -> Path:
+    """Raiz do repo (compartilhada com cpp/) ou pasta do .exe empacotado."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return SCRIPT_DIR.parent
+
+
+APP_DIR = resolve_app_dir()
 CONFIG_PATH = APP_DIR / "peers.json"
 STATE_PATH = APP_DIR / "state.json"
 LOG_PATH = APP_DIR / "monitor.log"
@@ -743,15 +753,20 @@ def _ps_single_quote(value: str) -> str:
 
 def create_startup_shortcut() -> None:
     lnk_path = startup_lnk_path()
-    pythonw = get_pythonw()
-    main_script = APP_DIR / "main.py"
+    if getattr(sys, "frozen", False):
+        target = str(Path(sys.executable).resolve())
+        arguments = "--run"
+    else:
+        target = get_pythonw()
+        main_script = SCRIPT_DIR / "main.py"
+        arguments = f'"{main_script}" --run'
     lnk_path.parent.mkdir(parents=True, exist_ok=True)
 
     ps = (
         "$ws = New-Object -ComObject WScript.Shell; "
         f"$s = $ws.CreateShortcut({_ps_single_quote(str(lnk_path))}); "
-        f"$s.TargetPath = {_ps_single_quote(pythonw)}; "
-        f"$s.Arguments = {_ps_single_quote(f'\"{main_script}\" --run')}; "
+        f"$s.TargetPath = {_ps_single_quote(target)}; "
+        f"$s.Arguments = {_ps_single_quote(arguments)}; "
         f"$s.WorkingDirectory = {_ps_single_quote(str(APP_DIR))}; "
         f"$s.Description = {_ps_single_quote(APP_NAME)}; "
         "$s.Save()"

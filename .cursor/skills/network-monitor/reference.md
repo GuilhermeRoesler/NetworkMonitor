@@ -318,9 +318,9 @@ chore: pin Pillow to >=10.0.0
 
 | Mudança | Arquivos típicos |
 |---------|------------------|
-| Nova ação na GUI | `gui.py` + função em `main.py` |
-| Novo campo de config | `main.py` (dataclass, load/save) + `gui.py` se visível |
-| Nova flag CLI | `main.py` (`build_parser`, `main`) |
+| Nova ação na GUI | `python/gui.py` + função em `python/main.py` |
+| Novo campo de config | `python/main.py` + `python/gui.py` se visível + `cpp` se schema |
+| Nova flag CLI | `python/main.py` (`build_parser`, `main`) e/ou `cpp/src/main.cpp` |
 | Skill/spec | `.cursor/skills/network-monitor/` |
 | Documentação usuário | `README.md` |
 
@@ -351,7 +351,9 @@ Após ocultar `26.0.0.99`:
 ## Diagnóstico rápido
 
 ```bash
-python main.py --status
+python/run.bat --status
+# ou: python python/main.py --status
+# C++: cpp/run.bat --status
 ```
 
 Saída esperada (exemplo):
