@@ -429,8 +429,13 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
                 ShowWindow(hwnd_, SW_HIDE);
                 return 0;
             }
-            PostQuitMessage(0);
-            DestroyWindow(hwnd_);
+            // Modo sem bandeja (ex.: --gui): fechar com X encerra o app.
+            // Encaminha ao message window do controller para setar stop cedo.
+            if (owner_ != nullptr) {
+                PostMessageW(owner_, WM_CLOSE, 0, 0);
+            } else {
+                PostQuitMessage(0);
+            }
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd_, kRefreshTimerId);

@@ -315,6 +315,9 @@ std::vector<Peer> discover_peers(
                 if (!ping_host(ip, 800)) {
                     continue;
                 }
+                if (stop != nullptr && stop->load()) {
+                    break;
+                }
                 if (known_ips.count(ip)) {
                     continue;
                 }

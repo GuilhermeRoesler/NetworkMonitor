@@ -17,6 +17,14 @@ std::atomic_bool g_stop{false};
 
 void on_signal(int) { g_stop.store(true); }
 
+BOOL WINAPI on_console_ctrl(DWORD ctrl_type) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT || ctrl_type == CTRL_CLOSE_EVENT) {
+        g_stop.store(true);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 void ensure_console() { nm::set_console_logging_enabled(true); }
 
 void hide_console_window() {
@@ -44,6 +52,7 @@ void print_help() {
 int main(int argc, char** argv) {
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
+    SetConsoleCtrlHandler(on_console_ctrl, TRUE);
 
     std::string mode = "tray";
     for (int i = 1; i < argc; ++i) {

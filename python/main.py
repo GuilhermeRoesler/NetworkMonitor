@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import signal
 import socket
 import struct
 import subprocess
@@ -17,7 +18,6 @@ import sys
 import threading
 import time
 import winreg
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -523,6 +523,48 @@ def resolve_hostname(ip: str) -> str | None:
     return None
 
 
+def _ping_hosts_parallel(
+    ips: list[str],
+    timeout_ms: int,
+    *,
+    max_workers: int,
+    stop_event: threading.Event | None = None,
+) -> dict[str, bool]:
+    """Ping em paralelo com threads daemon; respeita stop_event entre hosts."""
+    if not ips:
+        return {}
+
+    results: dict[str, bool] = {}
+    results_lock = threading.Lock()
+    next_index = 0
+    index_lock = threading.Lock()
+
+    def worker() -> None:
+        nonlocal next_index
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                return
+            with index_lock:
+                index = next_index
+                next_index += 1
+            if index >= len(ips):
+                return
+            online = ping_host(ips[index], timeout_ms)
+            with results_lock:
+                results[ips[index]] = online
+
+    workers = min(max_workers, len(ips))
+    threads = [
+        threading.Thread(target=worker, daemon=True, name=f"nm-ping-{i}")
+        for i in range(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return results
+
+
 def subnet_for_ip(ip: str) -> ipaddress.IPv4Network:
     address = ipaddress.IPv4Address(ip)
     return ipaddress.IPv4Network(f"{address}/24", strict=False)
@@ -533,22 +575,28 @@ def discover_peers(
     known_ips: set[str],
     *,
     skip_ips: set[str] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> list[Peer]:
     network = subnet_for_ip(local_ip)
     excluded = known_ips | {local_ip} | (skip_ips or set())
     candidates = [str(host) for host in network.hosts() if str(host) not in excluded]
 
+    ping_results = _ping_hosts_parallel(
+        candidates,
+        800,
+        max_workers=32,
+        stop_event=stop_event,
+    )
+
     discovered: list[Peer] = []
-    with ThreadPoolExecutor(max_workers=32) as executor:
-        futures = {executor.submit(ping_host, ip, 800): ip for ip in candidates}
-        for future in as_completed(futures):
-            ip = futures[future]
-            if future.result():
-                if ip in known_ips:
-                    continue
-                name = resolve_hostname(ip) or ip
-                discovered.append(Peer(ip=ip, name=name))
-                logging.info("Peer descoberto: %s (%s)", name, ip)
+    for ip, online in ping_results.items():
+        if stop_event is not None and stop_event.is_set():
+            break
+        if not online or ip in known_ips:
+            continue
+        name = resolve_hostname(ip) or ip
+        discovered.append(Peer(ip=ip, name=name))
+        logging.info("Peer descoberto: %s (%s)", name, ip)
 
     return discovered
 
@@ -685,32 +733,42 @@ def notify(title: str, message: str) -> None:
     logging.info("Notificação: %s — %s", title, message)
 
 
-def check_peers(peers: list[Peer], previous: dict[str, bool]) -> dict[str, bool]:
+def check_peers(
+    peers: list[Peer],
+    previous: dict[str, bool],
+    stop_event: threading.Event | None = None,
+) -> dict[str, bool]:
     current: dict[str, bool] = dict(previous)
     monitored = [peer for peer in peers if not peer.hidden]
+    if not monitored:
+        for peer in peers:
+            if peer.hidden and peer.ip in current:
+                del current[peer.ip]
+        return current
 
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        futures = {executor.submit(ping_host, peer.ip): peer for peer in monitored}
-        for future in as_completed(futures):
-            peer = futures[future]
-            online = future.result()
-            current[peer.ip] = online
-            peer.online = online
+    by_ip = {peer.ip: peer for peer in monitored}
+    ping_results = _ping_hosts_parallel(
+        [peer.ip for peer in monitored],
+        1000,
+        max_workers=16,
+        stop_event=stop_event,
+    )
 
-            if peer.ip not in previous:
-                continue
+    for ip, online in ping_results.items():
+        peer = by_ip[ip]
+        current[ip] = online
+        peer.online = online
 
-            if previous[peer.ip] == online:
-                continue
+        if stop_event is not None and stop_event.is_set():
+            continue
+        if ip not in previous or previous[ip] == online or peer.muted:
+            continue
 
-            if peer.muted:
-                continue
-
-            status = "ficou online" if online else "ficou offline"
-            notify(
-                title=f"[{peer.network_name}] {peer.name} {status}",
-                message=f"IP: {peer.ip}",
-            )
+        status = "ficou online" if online else "ficou offline"
+        notify(
+            title=f"[{peer.network_name}] {peer.name} {status}",
+            message=f"IP: {peer.ip}",
+        )
 
     for peer in peers:
         if peer.hidden and peer.ip in current:
@@ -773,11 +831,12 @@ def create_startup_shortcut() -> None:
     lnk_path = startup_lnk_path()
     if getattr(sys, "frozen", False):
         target = str(Path(sys.executable).resolve())
-        arguments = "--run"
+        # Sem flags: bandeja + monitor (não usar --run, que é só console).
+        arguments = ""
     else:
         target = get_pythonw()
         main_script = SCRIPT_DIR / "main.py"
-        arguments = f'"{main_script}" --run'
+        arguments = f'"{main_script}"'
     lnk_path.parent.mkdir(parents=True, exist_ok=True)
 
     ps = (
@@ -906,6 +965,7 @@ def process_network(
     known_global_ips: set[str],
     last_scan: float,
     now: float,
+    stop_event: threading.Event | None = None,
 ) -> tuple[list[Peer], float, bool]:
     """Retorna peers atualizados, novo last_scan e se houve mudança na config."""
     if not network.enabled:
@@ -921,10 +981,13 @@ def process_network(
     config_changed = False
 
     if network.auto_discover and (now - last_scan) >= config.scan_interval_seconds:
+        if stop_event is not None and stop_event.is_set():
+            return peers, last_scan, False
         discovered = discover_peers(
             local_ip,
             known_ips,
             skip_ips=skip_ips_for_network(network.network_type, local_ip),
+            stop_event=stop_event,
         )
         for peer in discovered:
             peer.network_name = network.name
@@ -935,6 +998,8 @@ def process_network(
         last_scan = now
 
     if not peers and network.auto_discover:
+        if stop_event is not None and stop_event.is_set():
+            return peers, last_scan, config_changed
         logging.info(
             "Rede '%s' sem peers. Escaneando %s...",
             network.name,
@@ -944,6 +1009,7 @@ def process_network(
             local_ip,
             known_ips,
             skip_ips=skip_ips_for_network(network.network_type, local_ip),
+            stop_event=stop_event,
         )
         for peer in discovered:
             peer.network_name = network.name
@@ -972,9 +1038,11 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
         known_global_ips.update(local_ips)
 
         for network in config.networks:
+            if stop_event.is_set():
+                break
             last_scan = last_scans.get(network.name, 0.0)
             peers, new_last_scan, changed = process_network(
-                network, config, known_global_ips, last_scan, now
+                network, config, known_global_ips, last_scan, now, stop_event
             )
             last_scans[network.name] = new_last_scan
             if changed:
@@ -982,6 +1050,9 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
             for peer in peers:
                 known_global_ips.add(peer.ip)
             all_peers.extend(peers)
+
+        if stop_event.is_set():
+            break
 
         if config_changed:
             config = load_config()
@@ -1005,7 +1076,9 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
                 break
             continue
 
-        state = check_peers(visible_peers, state)
+        state = check_peers(visible_peers, state, stop_event)
+        if stop_event.is_set():
+            break
         save_state(state)
 
         online_count = sum(1 for peer in visible_peers if state.get(peer.ip))
@@ -1039,7 +1112,7 @@ def run_with_tray() -> None:
     monitor_thread.start()
 
     def open_panel(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        status_window.show(close_hides=True)
+        status_window.show()
 
     def toggle_notifications(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         set_notifications_enabled(not notifications_enabled())
@@ -1071,8 +1144,27 @@ def run_with_tray() -> None:
 
     stop_event.set()
     status_window.close()
-    status_window.wait_closed(timeout=5)
-    monitor_thread.join(timeout=5)
+    status_window.wait_closed(timeout=2)
+    monitor_thread.join(timeout=3)
+
+
+def run_console() -> None:
+    """Modo --run: apenas o loop no console (Ctrl+C encerra)."""
+    setup_logging()
+    stop_event = threading.Event()
+
+    def _request_stop(_signum: int, _frame: object) -> None:
+        logging.info("Sinal de encerramento recebido...")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+
+    try:
+        run_monitor_loop(stop_event)
+    except KeyboardInterrupt:
+        stop_event.set()
+        logging.info("Monitor encerrado.")
 
 
 def scan_network(network_type: str) -> bool:
@@ -1212,6 +1304,10 @@ def main() -> None:
         show_status()
         return
 
+    if args.run:
+        run_console()
+        return
+
     if args.gui:
         from gui import status_window
 
@@ -1227,7 +1323,7 @@ def main() -> None:
         status_window.show(close_hides=False)
         status_window.wait_closed()
         stop_event.set()
-        monitor_thread.join(timeout=5)
+        monitor_thread.join(timeout=3)
         return
 
     run_with_tray()

@@ -76,8 +76,12 @@ class StatusWindow:
             self._thread.start()
 
     def close(self) -> None:
-        if self._root is not None:
-            self._root.after(0, self._destroy)
+        root = self._root
+        if root is not None:
+            try:
+                root.after(0, self._destroy)
+            except tk.TclError:
+                pass
 
     def wait_closed(self, timeout: float | None = None) -> None:
         thread = self._thread
@@ -90,16 +94,28 @@ class StatusWindow:
         self._root.deiconify()
         self._root.lift()
         self._root.focus_force()
+        if self._refresh_job is None:
+            self._schedule_refresh()
 
     def _destroy(self) -> None:
         self._cancel_rename()
         if self._refresh_job and self._root is not None:
-            self._root.after_cancel(self._refresh_job)
+            try:
+                self._root.after_cancel(self._refresh_job)
+            except tk.TclError:
+                pass
             self._refresh_job = None
-        if self._root is not None:
-            self._root.quit()
-            self._root.destroy()
-            self._root = None
+        root = self._root
+        self._root = None
+        if root is not None:
+            try:
+                root.quit()
+            except tk.TclError:
+                pass
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
 
     def _run(self) -> None:
         try:
@@ -142,9 +158,6 @@ class StatusWindow:
     def _on_close(self) -> None:
         if self._close_hides:
             self._cancel_rename()
-            if self._refresh_job and self._root is not None:
-                self._root.after_cancel(self._refresh_job)
-                self._refresh_job = None
             if self._root is not None:
                 self._root.withdraw()
             return

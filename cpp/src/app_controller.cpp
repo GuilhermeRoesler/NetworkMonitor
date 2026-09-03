@@ -47,8 +47,12 @@ int AppController::run(HINSTANCE instance, int ncmdshow) {
         DispatchMessageW(&msg);
     }
 
+    stop_.store(true);
     tray_.destroy();
     stop_monitor();
+    if (status_window_ != nullptr) {
+        status_window_->close();
+    }
     return static_cast<int>(msg.wParam);
 }
 
@@ -108,6 +112,7 @@ LRESULT AppController::handle_message(UINT message, WPARAM wparam, LPARAM lparam
                     }
                     return 0;
                 case 1003:
+                    stop_.store(true);
                     PostQuitMessage(0);
                     return 0;
                 default:
@@ -136,6 +141,8 @@ LRESULT AppController::handle_message(UINT message, WPARAM wparam, LPARAM lparam
             }
             return 0;
         case kMsgQuitApp:
+        case WM_CLOSE:
+            stop_.store(true);
             PostQuitMessage(0);
             return 0;
         case kMsgLogLine: {
@@ -144,6 +151,7 @@ LRESULT AppController::handle_message(UINT message, WPARAM wparam, LPARAM lparam
             return 0;
         }
         case WM_DESTROY:
+            stop_.store(true);
             PostQuitMessage(0);
             return 0;
         default:

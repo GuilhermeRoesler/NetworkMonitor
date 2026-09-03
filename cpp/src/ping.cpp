@@ -17,7 +17,7 @@
 namespace nm {
 namespace {
 
-std::string run_hidden(const std::wstring& command) {
+std::string run_hidden(const std::wstring& command, DWORD timeout_ms) {
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
@@ -56,14 +56,42 @@ std::string run_hidden(const std::wstring& command) {
         return {};
     }
 
+    // Espera o processo com timeout; nunca bloquear para sempre em ReadFile
+    // (ping.exe travado prendia o join do monitor e o terminal).
     std::string output;
     char buffer[512];
-    DWORD read = 0;
-    while (ReadFile(read_pipe, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+    const ULONGLONG deadline = GetTickCount64() + timeout_ms;
+    for (;;) {
+        DWORD available = 0;
+        if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) && available > 0) {
+            const DWORD to_read = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
+            DWORD read = 0;
+            if (ReadFile(read_pipe, buffer, to_read, &read, nullptr) && read > 0) {
+                output.append(buffer, buffer + read);
+            }
+        }
+
+        const DWORD wait = WaitForSingleObject(pi.hProcess, 20);
+        if (wait == WAIT_OBJECT_0) {
+            break;
+        }
+        if (GetTickCount64() >= deadline) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 1000);
+            break;
+        }
+    }
+
+    DWORD available = 0;
+    while (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) && available > 0) {
+        const DWORD to_read = available < sizeof(buffer) ? available : static_cast<DWORD>(sizeof(buffer));
+        DWORD read = 0;
+        if (!ReadFile(read_pipe, buffer, to_read, &read, nullptr) || read == 0) {
+            break;
+        }
         output.append(buffer, buffer + read);
     }
 
-    WaitForSingleObject(pi.hProcess, 5000);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     CloseHandle(read_pipe);
@@ -112,10 +140,11 @@ bool ping_host(const std::string& ip, int timeout_ms) {
         return true;
     }
 
-    // Fallback alinhado à versão Python
+    // Fallback alinhado à versão Python (timeout rígido = ping + folga)
+    const DWORD process_timeout = static_cast<DWORD>(timeout_ms) + 2000u;
     const std::wstring cmd =
         L"ping -n 1 -w " + std::to_wstring(timeout_ms) + L" " + std::wstring(ip.begin(), ip.end());
-    const std::string output = run_hidden(cmd);
+    const std::string output = run_hidden(cmd, process_timeout);
     std::string lower = output;
     for (char& c : lower) {
         c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
@@ -125,7 +154,7 @@ bool ping_host(const std::string& ip, int timeout_ms) {
 
 std::string resolve_hostname(const std::string& ip) {
     const std::wstring cmd = L"ping -n 1 -a -w 1000 " + std::wstring(ip.begin(), ip.end());
-    const std::string output = run_hidden(cmd);
+    const std::string output = run_hidden(cmd, 4000);
     static const std::regex re(R"((?:Disparando|Pinging)\s+(\S+)\s+\[)", std::regex::icase);
     std::smatch match;
     if (!std::regex_search(output, match, re)) {
