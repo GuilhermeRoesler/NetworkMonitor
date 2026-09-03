@@ -1,0 +1,13 @@
+---
+description: Schema peers.json/state.json — leia a skill config-schema
+globs: cpp/include/config.hpp,cpp/src/config.cpp,cpp/tests/test_config.cpp,python/tests/test_config.py,python/tests/test_peer_order.py
+alwaysApply: false
+---
+
+# Config schema
+
+Ao mudar campos, defaults, `peer_order` ou load/save de config/state:
+
+1. Leia e siga **`.cursor/skills/config-schema/SKILL.md`**
+2. Exemplos: `.cursor/skills/config-schema/reference.md`
+3. Atualize **Python e C++** no mesmo change

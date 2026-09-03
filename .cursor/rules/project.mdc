@@ -1,0 +1,25 @@
+---
+description: Índice do Network Monitor — leia a skill do projeto e da área tocada
+alwaysApply: true
+---
+
+# Network Monitor
+
+App Windows (Python + C++) que monitora peers Radmin VPN e LAN via ping.
+
+Antes de implementar: leia **`.cursor/skills/project/SKILL.md`**, depois a skill da área.
+
+| Área | Rule (globs) | Skill |
+|------|----------------|-------|
+| Schema JSON | `config-schema` | `.cursor/skills/config-schema/SKILL.md` |
+| Monitor / tray / CLI | `python-monitor` | `.cursor/skills/python-monitor/SKILL.md` |
+| Painel tkinter | `python-gui` | `.cursor/skills/python-gui/SKILL.md` |
+| Core C++ | `cpp-core` | `.cursor/skills/cpp-core/SKILL.md` |
+| CI/CD | `ci-cd` | `.cursor/skills/ci-cd/SKILL.md` |
+
+## Invariantes
+
+- Só Windows; UI/logs em português.
+- `peers.json` / `state.json` / `monitor.log` na **raiz** (não versionar).
+- Schema novo → Python **e** C++.
+- Commits: Conventional Commits em inglês.

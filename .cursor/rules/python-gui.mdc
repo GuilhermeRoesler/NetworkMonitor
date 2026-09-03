@@ -1,0 +1,13 @@
+---
+description: GUI tkinter StatusWindow — leia a skill python-gui
+globs: python/gui.py
+alwaysApply: false
+---
+
+# Python GUI
+
+Ao alterar `python/gui.py` (painel, Treeview, DnD, rename, menus):
+
+Leia e siga **`.cursor/skills/python-gui/SKILL.md`**.
+
+Ações de persistência vivem em `main.py` — não duplicar I/O de config na GUI.

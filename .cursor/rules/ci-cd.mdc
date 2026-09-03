@@ -1,0 +1,13 @@
+---
+description: Pipelines CI/CD GitHub Actions — leia a skill ci-cd
+globs: .github/workflows/**/*,pyproject.toml
+alwaysApply: false
+---
+
+# CI/CD
+
+Ao editar workflows, tooling de lint/test ou o fluxo de release:
+
+Leia e siga **`.cursor/skills/ci-cd/SKILL.md`**.
+
+Lembrete: `README.md` é obrigatório no job `validate`; não versionar `peers.json`/`state.json`/`monitor.log`.

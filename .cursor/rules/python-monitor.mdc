@@ -1,0 +1,14 @@
+---
+description: Monitor Python (ping, tray, toast, CLI) — leia a skill python-monitor
+globs: python/main.py,python/build.py,python/requirements*.txt,python/tests/**/*.py,python/run.bat,python/run.sh,run.bat,run.sh
+alwaysApply: false
+---
+
+# Python monitor
+
+Ao editar o core Python (monitor, descoberta, bandeja, toast, startup, CLI, build):
+
+Leia e siga **`.cursor/skills/python-monitor/SKILL.md`**.
+
+Se a mudança tocar campos JSON, leia também `config-schema`.
+Se tocar o painel, leia também `python-gui`.
