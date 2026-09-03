@@ -831,29 +831,30 @@ def create_tray_icon_image() -> Image.Image:
         with Image.open(icon_path) as image:
             return image.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
 
-    # Fallback se assets/ estiver ausente
+    # Fallback se assets/ estiver ausente (mesmo motivo: radar + peers + online)
     size = 64
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     margin = 4
     draw.rounded_rectangle(
         (margin, margin, size - margin, size - margin),
-        radius=12,
-        fill=(11, 31, 51, 255),
+        radius=14,
+        fill=(0, 120, 212, 255),
     )
     cx = cy = size // 2
-    for radius in (22, 16, 10):
+    for radius in (22, 15):
         box = (cx - radius, cy - radius, cx + radius, cy + radius)
-        draw.ellipse(box, outline=(61, 220, 255, 180), width=1)
-    nodes = ((cx, cy - 14), (cx - 14, cy + 10), (cx + 14, cy + 10), (cx, cy))
-    for x0, y0 in nodes[:3]:
-        draw.line((cx, cy, x0, y0), fill=(0, 180, 216, 255), width=2)
-    draw.line((nodes[0][0], nodes[0][1], nodes[1][0], nodes[1][1]), fill=(0, 180, 216, 220), width=1)
-    draw.line((nodes[1][0], nodes[1][1], nodes[2][0], nodes[2][1]), fill=(0, 180, 216, 220), width=1)
-    draw.line((nodes[2][0], nodes[2][1], nodes[0][0], nodes[0][1]), fill=(0, 180, 216, 220), width=1)
-    for x, y in nodes:
-        r = 4 if (x, y) != (cx, cy) else 5
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=(61, 220, 255, 255))
+        draw.ellipse(box, outline=(255, 255, 255, 140), width=2)
+    peers = ((cx + 19, cy - 11), (cx - 14, cy + 17), (cx - 19, cy - 11))
+    for x0, y0 in peers:
+        draw.line((cx, cy, x0, y0), fill=(255, 255, 255, 230), width=2)
+    draw.ellipse((cx - 5, cy - 5, cx + 5, cy + 5), fill=(255, 255, 255, 255))
+    for i, (x, y) in enumerate(peers):
+        if i == 0:
+            draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill=(255, 255, 255, 255))
+            draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=(26, 127, 55, 255))
+        else:
+            draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=(255, 255, 255, 255))
     return image
 
 
