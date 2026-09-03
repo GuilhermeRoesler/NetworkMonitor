@@ -15,5 +15,8 @@ fs::path resolve_app_dir();
 fs::path config_path();
 fs::path state_path();
 fs::path log_path();
+fs::path assets_dir();
+fs::path icon_ico_path();
+fs::path icon_png_path();
 
 }  // namespace nm

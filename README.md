@@ -6,7 +6,7 @@ Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, desco
 
 - Windows
 - Python 3.10+ (versão principal)
-- CMake + compilador C++17 (versão CLI opcional)
+- CMake + compilador C++17 (versão nativa Win32 opcional)
 
 ## Início rápido
 
@@ -26,7 +26,10 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | `.\python\run.bat --scan-all` | Escaneia Radmin e LAN |
 | `.\python\run.bat --gui` | Monitor + painel |
 | `.\python\run.bat --install` | Atalho na pasta Startup |
-| `.\cpp\run.bat --status` | Mesmo status via C++ (compila se preciso) |
+| `.\cpp\run.bat` | Bandeja + monitor (C++ Win32, compila se preciso) |
+| `.\cpp\run.bat --gui` | Monitor + painel Win32 |
+| `.\cpp\run.bat --status` | Mesmo status via C++ |
+| `.\cpp\run.bat --scan-all` | Escaneia Radmin e LAN via C++ |
 
 ## O que cada versão faz
 
@@ -34,10 +37,11 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 |---------|--------|-----|
 | Ping / descoberta / loop | sim | sim |
 | `peers.json` / `state.json` | sim | sim |
-| Toast / bandeja / painel | sim | não |
+| Toast / bandeja / painel | sim | sim |
+| Renomear / ocultar / silenciar / reorder | sim | sim |
 | Startup do Windows | sim | não |
 
-Config e estado ficam na **raiz do repositório** e são compartilhados.
+Config, estado e log ficam na **raiz do repositório** e são compartilhados.
 
 ## Configuração
 
@@ -51,6 +55,14 @@ Na primeira execução é gerado `peers.json`. Campos principais:
 Por peer: `hidden` (não monitora) e `muted` (monitora sem notificar).
 
 `peers.json`, `state.json` e `monitor.log` são locais — não vão para o git.
+
+Na versão C++ com UI Win32:
+
+- sem flags: inicia monitor + bandeja
+- `--gui`: inicia monitor + painel, sem bandeja
+- fechar a janela no `X` apenas oculta o painel
+- o encerramento completo do modo bandeja acontece pelo menu `Encerrar`
+- os toasts seguem `notifications_enabled`, `muted` e peers ocultos
 
 ## Build
 
@@ -70,6 +82,8 @@ Saída: `python/dist/NetworkMonitor/`.
 cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
 cmake --build cpp/build --config Release
 ```
+
+Executável típico: `cpp/build/bin/NetworkMonitorCpp.exe`.
 
 ## Desenvolvimento
 

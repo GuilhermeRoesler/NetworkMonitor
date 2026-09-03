@@ -1,5 +1,6 @@
 #include "monitor.hpp"
 
+#include "logging.hpp"
 #include "network.hpp"
 #include "ping.hpp"
 
@@ -14,14 +15,20 @@
 namespace nm {
 namespace {
 
-void log_line(const std::string& message) {
-    std::cout << message << std::endl;
+void emit_log(MonitorEventSink* sink, const std::string& message) {
+    log_message(message);
+    if (sink != nullptr) {
+        sink->on_log_message(message);
+    }
 }
 
 }  // namespace
 
-StateMap check_peers(std::vector<Peer>& peers, const StateMap& previous, bool /*notifications_enabled*/) {
-    // Fase 1: sem toast WinRT — apenas atualiza estado (transições vão para o log).
+StateMap check_peers(
+    std::vector<Peer>& peers,
+    const StateMap& previous,
+    bool notifications_enabled,
+    MonitorEventSink* sink) {
     StateMap current = previous;
     std::vector<Peer*> monitored;
     for (auto& peer : peers) {
@@ -54,8 +61,12 @@ StateMap check_peers(std::vector<Peer>& peers, const StateMap& previous, bool /*
                     continue;
                 }
                 const char* status = online ? "ficou online" : "ficou offline";
-                log_line(std::string("[") + peer->network_name + "] " + peer->name + " " + status +
-                         " — IP: " + peer->ip);
+                const std::string message = std::string("[") + peer->network_name + "] " + peer->name + " " +
+                                            status + " — IP: " + peer->ip;
+                emit_log(sink, message);
+                if (notifications_enabled && sink != nullptr) {
+                    sink->on_peer_transition(PeerTransitionEvent{*peer, online});
+                }
             }
         });
     }
@@ -71,8 +82,8 @@ StateMap check_peers(std::vector<Peer>& peers, const StateMap& previous, bool /*
     return current;
 }
 
-void run_monitor_loop(std::atomic_bool& stop) {
-    log_line("Iniciando Network Monitor (C++)");
+void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
+    emit_log(sink, "Iniciando Network Monitor (C++)");
     MonitorConfig config = load_config();
     StateMap state = load_state();
     std::unordered_map<std::string, double> last_scans;
@@ -98,7 +109,7 @@ void run_monitor_loop(std::atomic_bool& stop) {
             }
             auto local_ip = get_local_ip(network.network_type);
             if (!local_ip) {
-                log_line("Rede '" + network.name + "' (" + network.network_type + ") não detectada.");
+                emit_log(sink, "Rede '" + network.name + "' (" + network.network_type + ") não detectada.");
                 continue;
             }
 
@@ -107,14 +118,15 @@ void run_monitor_loop(std::atomic_bool& stop) {
             const bool empty = network.peers.empty() && network.auto_discover;
 
             if (due || empty) {
-                auto discovered = discover_peers(
-                    *local_ip,
-                    known_global,
-                    skip_ips_for_network(network.network_type, *local_ip));
+                auto discovered =
+                    discover_peers(*local_ip, known_global, skip_ips_for_network(network.network_type, *local_ip));
                 for (auto& peer : discovered) {
                     peer.network_name = network.name;
                     peer.network_type = network.network_type;
-                    log_line("Peer descoberto: " + peer.name + " (" + peer.ip + ")");
+                    emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
+                    if (sink != nullptr) {
+                        sink->on_peer_discovered(PeerDiscoveredEvent{peer});
+                    }
                 }
                 if (!discovered.empty()) {
                     persist_discovered_peers(network.name, discovered);
@@ -141,10 +153,12 @@ void run_monitor_loop(std::atomic_bool& stop) {
             }
         }
 
+        const auto radmin = get_radmin_ip();
+        const auto lan = get_lan_ip();
         if (visible.empty()) {
-            log_line("Nenhum peer configurado ou encontrado. Aguardando...");
+            emit_log(sink, "Nenhum peer configurado ou encontrado. Aguardando...");
         } else {
-            state = check_peers(visible, state, config.notifications_enabled);
+            state = check_peers(visible, state, config.notifications_enabled, sink);
             save_state(state, config);
             int online_count = 0;
             for (const auto& peer : visible) {
@@ -152,19 +166,37 @@ void run_monitor_loop(std::atomic_bool& stop) {
                     ++online_count;
                 }
             }
-            const auto radmin = get_radmin_ip();
-            const auto lan = get_lan_ip();
-            log_line(
-                "Verificação concluída: " + std::to_string(online_count) + "/" + std::to_string(visible.size()) +
-                " online (" + std::to_string(config.hidden_peers().size()) + " ocultos) · Radmin: " +
-                (radmin ? *radmin : "—") + " · LAN: " + (lan ? *lan : "—"));
+            emit_log(sink, "Verificação concluída: " + std::to_string(online_count) + "/" +
+                               std::to_string(visible.size()) + " online (" +
+                               std::to_string(config.hidden_peers().size()) + " ocultos) · Radmin: " +
+                               (radmin ? *radmin : "—") + " · LAN: " + (lan ? *lan : "—"));
+        }
+
+        if (sink != nullptr) {
+            MonitorSnapshot snapshot;
+            snapshot.peers = config.all_peers();
+            snapshot.state = state;
+            snapshot.radmin_ip = radmin.value_or("");
+            snapshot.lan_ip = lan.value_or("");
+            snapshot.visible_count = static_cast<int>(config.visible_peers().size());
+            snapshot.hidden_count = static_cast<int>(config.hidden_peers().size());
+            snapshot.online_count = 0;
+            snapshot.notifications_enabled = config.notifications_enabled;
+            for (const auto& peer : config.visible_peers()) {
+                auto it = state.find(peer.ip);
+                if (it != state.end() && it->second) {
+                    ++snapshot.online_count;
+                }
+            }
+            sink->on_snapshot(snapshot);
         }
 
         for (int i = 0; i < config.interval_seconds * 10 && !stop.load(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        config = load_config();
     }
-    log_line("Monitor encerrado.");
+    emit_log(sink, "Monitor encerrado.");
 }
 
 bool scan_network(const std::string& network_type) {

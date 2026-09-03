@@ -90,6 +90,41 @@ json read_json(const fs::path& path) {
     return raw;
 }
 
+json load_raw_config() {
+    const auto path = config_path();
+    if (!fs::exists(path)) {
+        save_default_config();
+    }
+    return read_json(path);
+}
+
+void save_raw_config(const json& raw) { write_json(config_path(), raw); }
+
+json* find_peer(json& raw, const std::string& ip, std::string* peer_name = nullptr) {
+    for (auto& network : raw["networks"]) {
+        for (auto& peer : network["peers"]) {
+            if (peer.value("ip", "") == ip) {
+                if (peer_name != nullptr) {
+                    *peer_name = peer.value("name", ip);
+                }
+                return &peer;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const json* find_peer(const json& raw, const std::string& ip) {
+    for (const auto& network : raw["networks"]) {
+        for (const auto& peer : network["peers"]) {
+            if (peer.value("ip", "") == ip) {
+                return &peer;
+            }
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 std::vector<Peer> MonitorConfig::all_peers() const {
@@ -259,8 +294,7 @@ void persist_discovered_peers(const std::string& network_name, const std::vector
     if (discovered.empty()) {
         return;
     }
-    const auto path = config_path();
-    json raw = read_json(path);
+    json raw = load_raw_config();
     auto& networks = raw["networks"];
     json* target = nullptr;
     for (auto& network : networks) {
@@ -293,7 +327,165 @@ void persist_discovered_peers(const std::string& network_name, const std::vector
         }
     }
     raw["peer_order"] = order;
-    write_json(path, raw);
+    save_raw_config(raw);
+}
+
+bool update_peer_name(const std::string& ip, const std::string& new_name) {
+    if (new_name.empty()) {
+        return false;
+    }
+
+    json raw = load_raw_config();
+    json* peer = find_peer(raw, ip);
+    if (peer == nullptr) {
+        return false;
+    }
+
+    (*peer)["name"] = new_name;
+    save_raw_config(raw);
+    return true;
+}
+
+bool set_peer_hidden(const std::string& ip, bool hidden) {
+    json raw = load_raw_config();
+    json* peer = find_peer(raw, ip);
+    if (peer == nullptr) {
+        return false;
+    }
+
+    if (hidden) {
+        (*peer)["hidden"] = true;
+    } else {
+        peer->erase("hidden");
+    }
+    normalize_peer_order(raw);
+    save_raw_config(raw);
+    return true;
+}
+
+bool set_peer_muted(const std::string& ip, bool muted) {
+    json raw = load_raw_config();
+    json* peer = find_peer(raw, ip);
+    if (peer == nullptr) {
+        return false;
+    }
+
+    if (muted) {
+        (*peer)["muted"] = true;
+    } else {
+        peer->erase("muted");
+    }
+    save_raw_config(raw);
+    return true;
+}
+
+void set_notifications_enabled(bool enabled) {
+    json raw = load_raw_config();
+    raw["notifications_enabled"] = enabled;
+    save_raw_config(raw);
+}
+
+void save_peer_order(const std::vector<std::string>& order) {
+    json raw = load_raw_config();
+    const auto peer_ips = collect_peer_ips(raw);
+    std::set<std::string> known(peer_ips.begin(), peer_ips.end());
+    const std::set<std::string> hidden = get_hidden_ips(raw);
+
+    std::vector<std::string> normalized;
+    for (const auto& ip : order) {
+        if (known.count(ip) && std::find(normalized.begin(), normalized.end(), ip) == normalized.end()) {
+            normalized.push_back(ip);
+        }
+    }
+    for (const auto& ip : peer_ips) {
+        if (std::find(normalized.begin(), normalized.end(), ip) == normalized.end()) {
+            normalized.push_back(ip);
+        }
+    }
+
+    std::vector<std::string> visible;
+    std::vector<std::string> hidden_order;
+    for (const auto& ip : normalized) {
+        if (hidden.count(ip)) {
+            hidden_order.push_back(ip);
+        } else {
+            visible.push_back(ip);
+        }
+    }
+    visible.insert(visible.end(), hidden_order.begin(), hidden_order.end());
+    raw["peer_order"] = visible;
+    save_raw_config(raw);
+}
+
+bool move_peer(const std::string& dragged_ip, const std::string& target_ip) {
+    if (dragged_ip == target_ip) {
+        return false;
+    }
+
+    json raw = load_raw_config();
+    const std::set<std::string> hidden = get_hidden_ips(raw);
+    if (hidden.count(dragged_ip)) {
+        return false;
+    }
+
+    std::vector<std::string> order = normalize_peer_order(raw);
+    if (std::find(order.begin(), order.end(), dragged_ip) == order.end()) {
+        return false;
+    }
+
+    std::vector<std::string> visible;
+    std::vector<std::string> hidden_order;
+    for (const auto& ip : order) {
+        if (hidden.count(ip)) {
+            hidden_order.push_back(ip);
+        } else {
+            visible.push_back(ip);
+        }
+    }
+
+    visible.erase(std::remove(visible.begin(), visible.end(), dragged_ip), visible.end());
+    const auto target_it = std::find(visible.begin(), visible.end(), target_ip);
+    if (target_it == visible.end()) {
+        visible.push_back(dragged_ip);
+    } else {
+        visible.insert(target_it, dragged_ip);
+    }
+
+    visible.insert(visible.end(), hidden_order.begin(), hidden_order.end());
+    raw["peer_order"] = visible;
+    save_raw_config(raw);
+    return true;
+}
+
+bool move_peer_to_end(const std::string& dragged_ip) {
+    json raw = load_raw_config();
+    const std::set<std::string> hidden = get_hidden_ips(raw);
+    if (hidden.count(dragged_ip)) {
+        return false;
+    }
+
+    std::vector<std::string> order = normalize_peer_order(raw);
+    std::vector<std::string> visible;
+    std::vector<std::string> hidden_order;
+    for (const auto& ip : order) {
+        if (hidden.count(ip)) {
+            hidden_order.push_back(ip);
+        } else {
+            visible.push_back(ip);
+        }
+    }
+
+    const auto it = std::find(visible.begin(), visible.end(), dragged_ip);
+    if (it == visible.end()) {
+        return false;
+    }
+    visible.erase(it);
+    visible.push_back(dragged_ip);
+
+    visible.insert(visible.end(), hidden_order.begin(), hidden_order.end());
+    raw["peer_order"] = visible;
+    save_raw_config(raw);
+    return true;
 }
 
 }  // namespace nm

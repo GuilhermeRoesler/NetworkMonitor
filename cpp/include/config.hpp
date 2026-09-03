@@ -45,5 +45,12 @@ void save_default_config();
 StateMap load_state();
 void save_state(const StateMap& state, const MonitorConfig& config);
 void persist_discovered_peers(const std::string& network_name, const std::vector<Peer>& discovered);
+bool update_peer_name(const std::string& ip, const std::string& new_name);
+bool set_peer_hidden(const std::string& ip, bool hidden);
+bool set_peer_muted(const std::string& ip, bool muted);
+void set_notifications_enabled(bool enabled);
+void save_peer_order(const std::vector<std::string>& order);
+bool move_peer(const std::string& dragged_ip, const std::string& target_ip);
+bool move_peer_to_end(const std::string& dragged_ip);
 
 }  // namespace nm

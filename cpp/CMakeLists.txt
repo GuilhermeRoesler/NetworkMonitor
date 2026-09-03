@@ -10,6 +10,8 @@ set(NM_CORE_SOURCES
   src/ping.cpp
   src/network.cpp
   src/monitor.cpp
+  src/logging.cpp
+  src/win32_helpers.cpp
 )
 
 add_library(network_monitor_core STATIC ${NM_CORE_SOURCES})
@@ -27,8 +29,14 @@ else()
   target_link_libraries(network_monitor_core PUBLIC iphlpapi ws2_32 advapi32)
 endif()
 
-add_executable(NetworkMonitorCpp src/main.cpp)
-target_link_libraries(NetworkMonitorCpp PRIVATE network_monitor_core)
+add_executable(NetworkMonitorCpp
+  src/main.cpp
+  src/app_controller.cpp
+  src/status_window.cpp
+  src/tray_icon.cpp
+  src/toast.cpp
+)
+target_link_libraries(NetworkMonitorCpp PRIVATE network_monitor_core user32 shell32 gdi32 comctl32 ole32 runtimeobject propsys uxtheme)
 
 set_target_properties(NetworkMonitorCpp PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"

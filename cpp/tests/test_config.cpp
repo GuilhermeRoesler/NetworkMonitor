@@ -148,9 +148,63 @@ void test_persist_discovered_peers() {
     NM_CHECK(found);
 }
 
+void test_update_peer_actions() {
+    TempAppDir tmp;
+    {
+        std::ofstream out(tmp.path() / "peers.json", std::ios::binary);
+        out << R"({
+  "interval_seconds": 15,
+  "auto_discover": true,
+  "scan_interval_seconds": 300,
+  "notifications_enabled": true,
+  "peer_order": ["26.0.0.2", "26.0.0.3", "26.0.0.9"],
+  "networks": [
+    {
+      "name": "Radmin VPN",
+      "type": "radmin",
+      "enabled": true,
+      "peers": [
+        {"name": "PC-A", "ip": "26.0.0.2"},
+        {"name": "PC-B", "ip": "26.0.0.3"},
+        {"name": "Oculto", "ip": "26.0.0.9", "hidden": true}
+      ]
+    }
+  ]
+})";
+    }
+
+    NM_CHECK(nm::update_peer_name("26.0.0.2", "Notebook"));
+    NM_CHECK(nm::set_peer_muted("26.0.0.2", true));
+    NM_CHECK(nm::set_peer_hidden("26.0.0.3", true));
+    nm::set_notifications_enabled(false);
+    NM_CHECK(nm::move_peer("26.0.0.2", "26.0.0.3"));
+    NM_CHECK(nm::move_peer_to_end("26.0.0.2"));
+
+    const auto config = nm::load_config();
+    NM_CHECK(!config.notifications_enabled);
+    NM_CHECK_EQ(config.peer_order.front(), std::string("26.0.0.2"));
+
+    bool renamed = false;
+    bool muted = false;
+    bool hidden = false;
+    for (const auto& peer : config.all_peers()) {
+        if (peer.ip == "26.0.0.2") {
+            renamed = peer.name == "Notebook";
+            muted = peer.muted;
+        }
+        if (peer.ip == "26.0.0.3") {
+            hidden = peer.hidden;
+        }
+    }
+    NM_CHECK(renamed);
+    NM_CHECK(muted);
+    NM_CHECK(hidden);
+}
+
 void run_config_tests() {
     test_monitor_config_peer_order();
     test_save_default_and_load_config();
     test_load_sample_config_and_state();
     test_persist_discovered_peers();
+    test_update_peer_actions();
 }
