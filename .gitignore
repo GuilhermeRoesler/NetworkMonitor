@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 *.pyo
+.coverage
+.pytest_cache/
+.ruff_cache/
+htmlcov/
 
 # Runtime data (shared at repo root)
 state.json

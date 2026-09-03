@@ -135,10 +135,14 @@ class StatusWindow:
         ttk.Label(header, text=APP_NAME, style="Header.TLabel").pack(anchor=tk.W)
 
         self._local_ip_var = tk.StringVar(value="IP local: ...")
-        ttk.Label(header, textvariable=self._local_ip_var, style="Muted.TLabel").pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(header, textvariable=self._local_ip_var, style="Muted.TLabel").pack(
+            anchor=tk.W, pady=(4, 0)
+        )
 
         self._summary_var = tk.StringVar(value="Carregando...")
-        ttk.Label(header, textvariable=self._summary_var, style="Summary.TLabel").pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(header, textvariable=self._summary_var, style="Summary.TLabel").pack(
+            anchor=tk.W, pady=(8, 0)
+        )
 
         toolbar = ttk.Frame(container)
         toolbar.pack(fill=tk.X, pady=(0, 8))
@@ -325,7 +329,9 @@ class StatusWindow:
         self._context_menu.delete(0, tk.END)
         self._context_menu.add_command(label="Renomear", command=self._rename_selected)
         self._context_menu.add_separator()
-        self._context_menu.add_command(label="Mover para o topo", command=self._move_selected_to_top)
+        self._context_menu.add_command(
+            label="Mover para o topo", command=self._move_selected_to_top
+        )
         self._context_menu.add_separator()
         if peer.hidden:
             self._context_menu.add_command(label="Mostrar dispositivo", command=self._show_selected)
@@ -424,7 +430,9 @@ class StatusWindow:
         from main import load_config
 
         peer = next((p for p in load_config().all_peers if p.ip == ip), None)
-        current_name = peer.name if peer else self._tree.set(item, "name").removeprefix("🔇 ").strip()
+        current_name = (
+            peer.name if peer else self._tree.set(item, "name").removeprefix("🔇 ").strip()
+        )
 
         self._editing_item = item
         self._editing_ip = ip
@@ -559,7 +567,9 @@ class StatusWindow:
                 self._summary_var.set("Nenhum peer configurado em peers.json")
             else:
                 offline_count = visible_total - online_count
-                summary = f"{online_count} online · {offline_count} offline · {visible_total} visíveis"
+                summary = (
+                    f"{online_count} online · {offline_count} offline · {visible_total} visíveis"
+                )
                 if hidden_total:
                     summary += f" · {hidden_total} ocultos"
                 if not config.notifications_enabled:

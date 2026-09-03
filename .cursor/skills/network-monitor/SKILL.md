@@ -34,13 +34,16 @@ python/
   main.py                 # Lógica central: config, ping, descoberta, monitor, CLI, bandeja
   gui.py                  # StatusWindow (tkinter)
   requirements.txt
+  requirements-dev.txt    # ruff, pytest (CI / desenvolvimento)
   build.py                # PyInstaller (onedir)
   run.bat / run.sh
+  tests/                  # pytest
 cpp/
   CMakeLists.txt
   include/                # paths, config, ping, network, monitor + nlohmann_json.hpp
   src/                    # implementação C++ (core CLI)
   run.bat / run.sh
+.github/workflows/ci.yml  # lint Python, testes, build C++
 peers.json                # Config (raiz; gitignored; compartilhado Python↔C++)
 state.json
 monitor.log
@@ -201,7 +204,7 @@ Singleton: `status_window = StatusWindow()`.
 3. **Logging** — `logging.info` para eventos de usuário; `logging.debug` para supressão de notificações
 4. **Subprocess Windows** — `creationflags=subprocess.CREATE_NO_WINDOW` em comandos ping/ipconfig
 5. **Tipagem** — dataclasses + type hints; `bool | None` para estado desconhecido
-6. **Sem testes automatizados** — não adicionar a menos que solicitado
+6. **Testes** — `python/tests/` via pytest; CI em `.github/workflows/ci.yml` (ruff + pytest + build C++)
 7. **Sem README/docs extras** — a menos que solicitado
 
 ## Onde implementar mudanças comuns
@@ -234,6 +237,15 @@ pip install -r python/requirements.txt
 python/run.bat --status
 python/run.bat --scan-all
 cpp/run.bat --status          # compila se necessário
+```
+
+Dev / CI local:
+
+```bash
+pip install -r python/requirements-dev.txt
+ruff check python
+ruff format --check python
+pytest
 ```
 
 Para debug do loop sem bandeja: `python/run.bat --run` (logs em `monitor.log` na raiz).

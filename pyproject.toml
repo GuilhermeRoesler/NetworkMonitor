@@ -1,0 +1,48 @@
+[project]
+name = "network-monitor"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Monitor de peers Radmin VPN e LAN para Windows"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["python"]
+extend-exclude = [
+  "cpp/build",
+  "python/build",
+  "python/dist",
+  "python/venv",
+  "**/nlohmann_json.hpp",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+  "SIM",  # flake8-simplify
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "E501",   # line length handled by formatter preference; keep readable logs/strings
+  "B905",   # zip(..., strict=) — py310+ optional style
+  "SIM105", # try/except pass is fine for tkinter TclError cleanup
+]
+
+[tool.ruff.lint.per-file-ignores]
+"python/tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["main", "gui"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+pythonpath = ["python"]
+addopts = "-q --tb=short"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

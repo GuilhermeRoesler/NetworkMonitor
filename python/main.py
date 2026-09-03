@@ -22,8 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw
     import pystray
+    from PIL import Image, ImageDraw
     from winotify import Notification, audio
 except ImportError:
     print("Dependência ausente. Execute: pip install -r python/requirements.txt")
@@ -518,11 +518,7 @@ def discover_peers(
 ) -> list[Peer]:
     network = subnet_for_ip(local_ip)
     excluded = known_ips | {local_ip} | (skip_ips or set())
-    candidates = [
-        str(host)
-        for host in network.hosts()
-        if str(host) not in excluded
-    ]
+    candidates = [str(host) for host in network.hosts() if str(host) not in excluded]
 
     discovered: list[Peer] = []
     with ThreadPoolExecutor(max_workers=32) as executor:
@@ -956,7 +952,10 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
             elif not local_ips:
                 logging.warning("Nenhuma rede detectada (Radmin/LAN). Aguardando...")
             else:
-                logging.info("Nenhum peer configurado ou encontrado. Próxima verificação em %ss.", config.interval_seconds)
+                logging.info(
+                    "Nenhum peer configurado ou encontrado. Próxima verificação em %ss.",
+                    config.interval_seconds,
+                )
             if stop_event.wait(config.interval_seconds):
                 break
             continue
@@ -1125,8 +1124,12 @@ def show_status() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--run", action="store_true", help="Executa o monitor em loop")
-    parser.add_argument("--install", action="store_true", help="Cria atalho na pasta Startup do Windows")
-    parser.add_argument("--uninstall", action="store_true", help="Remove o atalho da pasta Startup do Windows")
+    parser.add_argument(
+        "--install", action="store_true", help="Cria atalho na pasta Startup do Windows"
+    )
+    parser.add_argument(
+        "--uninstall", action="store_true", help="Remove o atalho da pasta Startup do Windows"
+    )
     parser.add_argument("--scan", action="store_true", help="Escaneia a sub-rede Radmin uma vez")
     parser.add_argument("--scan-lan", action="store_true", help="Escaneia a sub-rede LAN uma vez")
     parser.add_argument("--scan-all", action="store_true", help="Escaneia Radmin e LAN")
