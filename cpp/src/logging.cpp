@@ -22,6 +22,7 @@ void set_console_logging_enabled(bool enabled) {
 void log_message(const std::string& message) {
     std::lock_guard lock(g_log_mutex);
 
+    ensure_data_dir();
     std::ofstream out(log_path(), std::ios::app | std::ios::binary);
     if (out) {
         out << message << "\n";

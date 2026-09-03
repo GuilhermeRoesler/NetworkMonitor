@@ -8,7 +8,15 @@ Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, desco
 - Python 3.10+ (versão principal)
 - CMake + compilador C++17 (versão nativa Win32 opcional)
 
-## Início rápido
+## Instalação (release)
+
+Nas [Releases](../../releases) baixe `NetworkMonitor-Setup-v*.exe`, execute o instalador (Program Files) e abra pelo menu Iniciar.
+
+Configuração e logs ficam em `%LOCALAPPDATA%\NetworkMonitor\` (`peers.json`, `state.json`, `monitor.log`). A desinstalação não remove esses arquivos.
+
+Também há zips portáteis (Python e C++) na mesma release.
+
+## Início rápido (desenvolvimento)
 
 ```powershell
 pip install -r python/requirements.txt
@@ -40,8 +48,9 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | Toast / bandeja / painel | sim | sim |
 | Renomear / ocultar / silenciar / reorder | sim | sim |
 | Startup do Windows | sim | não |
+| Instalador Inno Setup | sim | não |
 
-Config, estado e log ficam na **raiz do repositório** e são compartilhados.
+Em desenvolvimento, config/estado/log ficam na **raiz do repositório**. Na build instalada/empacotada, em `%LOCALAPPDATA%\NetworkMonitor` (ou ao lado do `.exe` se já houver `peers.json` — modo portátil).
 
 ## Configuração
 
@@ -75,6 +84,15 @@ python build.py
 
 Saída: `python/dist/NetworkMonitor/`.
 
+**Instalador (Inno Setup 6):**
+
+```powershell
+# Após o PyInstaller; ISCC no PATH ou em Program Files
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.0.0 installer\NetworkMonitor.iss
+```
+
+Saída: `installer/Output/NetworkMonitor-Setup-v1.0.0.exe`.
+
 **C++:**
 
 ```powershell
@@ -93,7 +111,7 @@ ruff format --check python
 pytest
 ```
 
-CI em `.github/workflows/ci.yml`. Releases em tags `v*` via `cd.yml`.
+CI em `.github/workflows/ci.yml`. Releases em tags `v*` via `cd.yml` (Setup.exe + zips).
 
 ## Specs para agentes
 

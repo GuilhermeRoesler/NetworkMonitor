@@ -14,6 +14,7 @@ def tmp_app_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import main
 
     monkeypatch.setattr(main, "APP_DIR", tmp_path)
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "CONFIG_PATH", tmp_path / "peers.json")
     monkeypatch.setattr(main, "STATE_PATH", tmp_path / "state.json")
     monkeypatch.setattr(main, "LOG_PATH", tmp_path / "monitor.log")

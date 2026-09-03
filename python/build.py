@@ -41,7 +41,10 @@ def main() -> None:
     print("\nCompilação concluída!")
     if sys.platform == "win32":
         print(f"Executável em: dist/{APP_NAME}/{APP_NAME}.exe")
-        print("Copie peers.json para a pasta do .exe se quiser reutilizar a config.")
+        print("Instalador: compile installer/NetworkMonitor.iss (Inno Setup) após este build.")
+        print(
+            "Config em uso: %LOCALAPPDATA%\\NetworkMonitor (ou peers.json ao lado do .exe no modo portátil)."
+        )
     else:
         print(f"Executável em: dist/{APP_NAME}/{APP_NAME}")
 

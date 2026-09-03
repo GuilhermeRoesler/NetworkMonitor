@@ -9,7 +9,7 @@ description: >-
 
 # Config schema (`peers.json` / `state.json`)
 
-Arquivos na **raiz do repo** (gitignored). Python e C++ leem/escrevem o mesmo formato.
+Arquivos na **raiz do repo** em desenvolvimento (gitignored). Na build instalada/empacotada: `%LOCALAPPDATA%\NetworkMonitor\`. Python e C++ leem/escrevem o mesmo formato.
 
 ## Contratos
 

@@ -73,6 +73,7 @@ std::vector<std::string> normalize_peer_order(json& raw) {
 }
 
 void write_json(const fs::path& path, const json& raw) {
+    ensure_data_dir();
     std::ofstream out(path, std::ios::binary);
     if (!out) {
         throw std::runtime_error("Não foi possível gravar " + path.string());

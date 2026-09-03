@@ -32,13 +32,16 @@ python/gui.py             StatusWindow
 python/build.py           PyInstaller onedir
 python/tests/             pytest
 cpp/                      CMake → NetworkMonitorCpp.exe
+installer/                Inno Setup → NetworkMonitor-Setup-v*.exe
 assets/                   icon.png / icon.ico (bandeja, GUI, exe)
 .github/workflows/        ci.yml, cd.yml
 .cursor/rules/            rules breves → skills
 .cursor/skills/           specs por área
 ```
 
-`APP_DIR` = raiz do repo (dev) ou pasta do `.exe` (`sys.frozen` / release C++).
+`APP_DIR` = raiz do repo (dev) ou pasta do `.exe` (binários/assets).  
+`DATA_DIR` = mesma raiz em dev; em build instalada/empacotada = `%LOCALAPPDATA%\NetworkMonitor` (ou pasta do exe se já houver `peers.json` portátil).  
+Config/state/log sempre em `DATA_DIR`.
 
 ## Threads (Python)
 
@@ -66,5 +69,5 @@ Shutdown: `stop_event` → fechar GUI → `icon.stop()` → `join(5)`.
 - JSON: `indent=2`, `ensure_ascii=False` (Python) / `dump(2)` (C++).
 - Subprocess Windows: `CREATE_NO_WINDOW` em ping/ipconfig.
 - Schema novo → **Python e C++** no mesmo change.
-- Não versionar `peers.json`, `state.json`, `monitor.log`.
+- Não versionar `peers.json`, `state.json`, `monitor.log` (raiz em dev; AppData na instalação).
 - Commits: `feat|fix|docs|refactor|chore: …` (imperativo, inglês).

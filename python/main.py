@@ -30,20 +30,46 @@ except ImportError:
     sys.exit(1)
 
 APP_NAME = "Network Monitor"
+DATA_FOLDER_NAME = "NetworkMonitor"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def resolve_app_dir() -> Path:
-    """Raiz do repo (compartilhada com cpp/) ou pasta do .exe empacotado."""
+    """Raiz do repo ou pasta do .exe (binários / assets)."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return SCRIPT_DIR.parent
 
 
+def resolve_data_dir() -> Path:
+    """Onde ficam peers.json, state.json e monitor.log.
+
+    Em desenvolvimento: raiz do repo.
+    Empacotado: %LOCALAPPDATA%\\NetworkMonitor (instalação em Program Files).
+    Modo portátil: pasta do .exe se já existir peers.json ao lado.
+    """
+    if not getattr(sys, "frozen", False):
+        return SCRIPT_DIR.parent
+
+    exe_dir = Path(sys.executable).resolve().parent
+    if (exe_dir / "peers.json").is_file():
+        return exe_dir
+
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        return Path(local_appdata) / DATA_FOLDER_NAME
+    return exe_dir
+
+
+def ensure_data_dir() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
 APP_DIR = resolve_app_dir()
-CONFIG_PATH = APP_DIR / "peers.json"
-STATE_PATH = APP_DIR / "state.json"
-LOG_PATH = APP_DIR / "monitor.log"
+DATA_DIR = resolve_data_dir()
+CONFIG_PATH = DATA_DIR / "peers.json"
+STATE_PATH = DATA_DIR / "state.json"
+LOG_PATH = DATA_DIR / "monitor.log"
 ICON_PNG_NAME = "icon.png"
 ICON_ICO_NAME = "icon.ico"
 
@@ -62,6 +88,8 @@ def resolve_asset_path(name: str) -> Path | None:
         if path.is_file():
             return path
     return None
+
+
 LEGACY_STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 LEGACY_STARTUP_VALUE = "RadminMonitor"
 STARTUP_LINK_NAME = f"{APP_NAME}.lnk"
@@ -141,6 +169,7 @@ def sort_peers_by_order(peers: list[Peer], order: list[str]) -> list[Peer]:
 
 
 def setup_logging() -> None:
+    ensure_data_dir()
     handlers: list[logging.Handler] = [
         logging.FileHandler(LOG_PATH, encoding="utf-8"),
     ]
@@ -443,6 +472,7 @@ def notifications_enabled() -> bool:
 
 
 def save_default_config() -> None:
+    ensure_data_dir()
     default = {
         "interval_seconds": 15,
         "auto_discover": True,
@@ -479,6 +509,7 @@ def load_state() -> dict[str, bool]:
 
 
 def save_state(state: dict[str, bool]) -> None:
+    ensure_data_dir()
     config = load_config()
     hidden_ips = {peer.ip for peer in config.hidden_peers}
     cleaned = {ip: online for ip, online in state.items() if ip not in hidden_ips}
@@ -555,8 +586,7 @@ def _ping_hosts_parallel(
 
     workers = min(max_workers, len(ips))
     threads = [
-        threading.Thread(target=worker, daemon=True, name=f"nm-ping-{i}")
-        for i in range(workers)
+        threading.Thread(target=worker, daemon=True, name=f"nm-ping-{i}") for i in range(workers)
     ]
     for thread in threads:
         thread.start()

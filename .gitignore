@@ -17,5 +17,8 @@ python/build/
 python/dist/
 python/*.spec
 
+# Inno Setup
+installer/Output/
+
 # C++ build
 cpp/build/

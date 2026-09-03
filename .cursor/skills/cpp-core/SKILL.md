@@ -48,9 +48,11 @@ Atalho: `cpp/run.bat`.
 
 Namespace: `nm`.
 
-## `APP_DIR`
+## `APP_DIR` / dados
 
-Sobe a partir do exe até achar `python/main.py` + `cpp/CMakeLists.txt`, ou `peers.json`. Fallback: pasta do executável (release).
+- `resolve_app_dir`: sobe a partir do exe até achar repo (`python/main.py` + `cpp/CMakeLists.txt`); senão pasta do exe (assets).
+- `resolve_data_dir`: repo em dev; se empacotado e existir `peers.json` ao lado do exe → pasta do exe (portátil); senão `%LOCALAPPDATA%\NetworkMonitor`.
+- `config_path` / `state_path` / `log_path` usam `resolve_data_dir()`; `ensure_data_dir()` antes de gravar.
 
 ## CLI
 

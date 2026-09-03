@@ -17,8 +17,10 @@ Dev: `python/requirements-dev.txt` (ruff, pytest)
 ## Paths
 
 - `SCRIPT_DIR` = `python/`
-- `APP_DIR` = pai de `SCRIPT_DIR` (ou pasta do exe se `frozen`)
-- Config/state/log na `APP_DIR`
+- `APP_DIR` = pai de `SCRIPT_DIR` (ou pasta do exe se `frozen`) — binários/assets
+- `DATA_DIR` = raiz do repo em dev; `%LOCALAPPDATA%\NetworkMonitor` se `frozen` (exceto modo portátil com `peers.json` ao lado do exe)
+- Config/state/log na `DATA_DIR` (`ensure_data_dir` antes de gravar)
+- Instalador: `installer/NetworkMonitor.iss` → Program Files; dados em AppData
 
 ## Detecção de IP
 
@@ -78,6 +80,7 @@ Import de `gui` **lazy** (dentro da função) — nunca no top-level de `main.py
 | Item de menu tray | `run_with_tray` |
 | Flag CLI | `build_parser`, `main` |
 | Build exe | `python/build.py` |
+| Instalador | `installer/NetworkMonitor.iss` + job CD |
 
 ## Testes
 
