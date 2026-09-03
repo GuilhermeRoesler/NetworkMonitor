@@ -1,0 +1,181 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex. v1.0.0). Vazio = ref atual."
+        required: false
+        type: string
+
+concurrency:
+  group: cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-python:
+    name: Build Python (PyInstaller)
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        working-directory: python
+        run: python build.py
+
+      - name: Package artifact
+        run: |
+          $version = if ("${{ github.event.inputs.tag }}") {
+            "${{ github.event.inputs.tag }}".TrimStart("v")
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            "dev"
+          }
+          $src = "python/dist/NetworkMonitor"
+          if (-not (Test-Path $src)) { throw "Pasta PyInstaller não encontrada: $src" }
+          $zip = "NetworkMonitor-python-win-x64-v$version.zip"
+          Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
+          Write-Host "Artefato: $zip"
+          "PYTHON_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-release
+          path: ${{ env.PYTHON_ZIP }}
+          if-no-files-found: error
+          retention-days: 14
+
+  build-cpp:
+    name: Build C++ (Release)
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        run: cmake --build cpp/build --config Release --parallel
+
+      - name: Locate and package executable
+        run: |
+          $version = if ("${{ github.event.inputs.tag }}") {
+            "${{ github.event.inputs.tag }}".TrimStart("v")
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            "dev"
+          }
+          $exe = @(
+            "cpp/build/bin/NetworkMonitorCpp.exe",
+            "cpp/build/bin/Release/NetworkMonitorCpp.exe",
+            "cpp/build/Release/NetworkMonitorCpp.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path cpp/build -Recurse -Filter NetworkMonitorCpp.exe |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $exe) { throw "NetworkMonitorCpp.exe não encontrado após o build" }
+
+          $staging = "cpp-release-staging"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item $exe -Destination "$staging/NetworkMonitorCpp.exe"
+          $zip = "NetworkMonitorCpp-win-x64-v$version.zip"
+          Compress-Archive -Path "$staging\*" -DestinationPath $zip -Force
+          Write-Host "Artefato: $zip (de $exe)"
+          "CPP_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-release
+          path: ${{ env.CPP_ZIP }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: [build-python, build-cpp]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            echo "Dispare via push de tag v* ou informe o input 'tag'."
+            exit 1
+          fi
+          case "$TAG" in
+            v*) ;;
+            *) echo "Tag inválida (esperado v*): $TAG"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Python artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-release
+          path: artifacts
+
+      - name: Download C++ artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cpp-release
+          path: artifacts
+
+      - name: List release assets
+        run: ls -la artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Network Monitor ${{ steps.meta.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.meta.outputs.tag, '-') || contains(steps.meta.outputs.tag, 'rc') || contains(steps.meta.outputs.tag, 'beta') || contains(steps.meta.outputs.tag, 'alpha') }}
+          generate_release_notes: true
+          files: |
+            artifacts/NetworkMonitor-python-win-x64-v${{ steps.meta.outputs.version }}.zip
+            artifacts/NetworkMonitorCpp-win-x64-v${{ steps.meta.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

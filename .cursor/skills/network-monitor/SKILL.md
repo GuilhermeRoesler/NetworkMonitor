@@ -44,6 +44,7 @@ cpp/
   src/                    # implementação C++ (core CLI)
   run.bat / run.sh
 .github/workflows/ci.yml  # lint Python, testes, build C++
+.github/workflows/cd.yml  # release: build PyInstaller + C++ em tags v*
 peers.json                # Config (raiz; gitignored; compartilhado Python↔C++)
 state.json
 monitor.log
@@ -205,7 +206,8 @@ Singleton: `status_window = StatusWindow()`.
 4. **Subprocess Windows** — `creationflags=subprocess.CREATE_NO_WINDOW` em comandos ping/ipconfig
 5. **Tipagem** — dataclasses + type hints; `bool | None` para estado desconhecido
 6. **Testes** — `python/tests/` via pytest; CI em `.github/workflows/ci.yml` (ruff + pytest + build C++)
-7. **Sem README/docs extras** — a menos que solicitado
+7. **Releases** — CD em `.github/workflows/cd.yml` nas tags `v*` (PyInstaller + C++ → GitHub Release)
+8. **Sem README/docs extras** — a menos que solicitado
 
 ## Onde implementar mudanças comuns
 
