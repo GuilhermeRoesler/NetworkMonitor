@@ -1,0 +1,416 @@
+(() => {
+  const STATUS_CLASS = {
+    Online: "online",
+    Offline: "offline",
+    Desconhecido: "unknown",
+    Oculto: "oculto",
+  };
+
+  const els = {
+    localIps: document.getElementById("local-ips"),
+    chips: document.getElementById("summary-chips"),
+    list: document.getElementById("peer-list"),
+    empty: document.getElementById("empty-state"),
+    updatedAt: document.getElementById("updated-at"),
+    btnRefresh: document.getElementById("btn-refresh"),
+    chkNotifications: document.getElementById("chk-notifications"),
+    chkHidden: document.getElementById("chk-hidden"),
+    menu: document.getElementById("context-menu"),
+  };
+
+  let snapshot = null;
+  let selectedIp = null;
+  let busy = false;
+  let dragIp = null;
+  let contextIp = null;
+  let renameInput = null;
+  let apiReady = false;
+
+  function statusClass(status) {
+    return STATUS_CLASS[status] || "unknown";
+  }
+
+  function hideMenu() {
+    els.menu.classList.add("hidden");
+    els.menu.innerHTML = "";
+    contextIp = null;
+  }
+
+  function setBusy(value) {
+    busy = value;
+  }
+
+  async function apiCall(name, ...args) {
+    if (!window.pywebview || !window.pywebview.api) {
+      return null;
+    }
+    return window.pywebview.api[name](...args);
+  }
+
+  function renderChips(snap) {
+    const chips = [];
+    chips.push(
+      `<span class="chip online"><span class="dot"></span>${snap.online_count} online</span>`,
+    );
+    chips.push(
+      `<span class="chip offline"><span class="dot"></span>${snap.offline_count} offline</span>`,
+    );
+    chips.push(`<span class="chip">${snap.visible_count} visíveis</span>`);
+    if (snap.hidden_count) {
+      chips.push(`<span class="chip">${snap.hidden_count} ocultos</span>`);
+    }
+    if (!snap.notifications_enabled) {
+      chips.push(`<span class="chip warn">notificações pausadas</span>`);
+    }
+    els.chips.innerHTML = chips.join("");
+  }
+
+  function renderPeers(snap) {
+    const peers = snap.peers || [];
+    els.empty.classList.toggle("hidden", peers.length > 0 || snap.visible_count + snap.hidden_count > 0);
+    if (peers.length === 0) {
+      els.list.innerHTML = "";
+      if (snap.visible_count + snap.hidden_count === 0) {
+        els.empty.classList.remove("hidden");
+      }
+      return;
+    }
+    els.empty.classList.add("hidden");
+
+    const html = peers
+      .map((peer) => {
+        const selected = peer.ip === selectedIp ? " selected" : "";
+        const mutedBadge = peer.muted && !peer.hidden
+          ? `<span class="badge-muted">Silenciado</span>`
+          : "";
+        const klass = statusClass(peer.status);
+        return `
+          <div class="peer-row${selected}" role="listitem" tabindex="0"
+               data-ip="${peer.ip}" draggable="true">
+            <div class="peer-name">
+              <span class="peer-name-text">${escapeHtml(peer.name)}</span>
+              ${mutedBadge}
+            </div>
+            <div class="peer-ip">${escapeHtml(peer.ip)}</div>
+            <span class="status-pill ${klass}"><span class="dot"></span>${escapeHtml(peer.status)}</span>
+          </div>`;
+      })
+      .join("");
+    els.list.innerHTML = html;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function applySnapshot(snap) {
+    if (!snap || busy) {
+      return;
+    }
+    snapshot = snap;
+    els.localIps.textContent = snap.local_ips || "Nenhuma rede detectada";
+    els.updatedAt.textContent = snap.updated_at ? `Atualizado às ${snap.updated_at}` : "";
+    els.chkNotifications.checked = !!snap.notifications_enabled;
+    els.chkHidden.checked = !!snap.show_hidden;
+    renderChips(snap);
+    renderPeers(snap);
+  }
+
+  window.updateSnapshot = applySnapshot;
+
+  function peerByIp(ip) {
+    return (snapshot?.peers || []).find((p) => p.ip === ip) || null;
+  }
+
+  function selectRow(ip) {
+    selectedIp = ip;
+    for (const row of els.list.querySelectorAll(".peer-row")) {
+      row.classList.toggle("selected", row.dataset.ip === ip);
+    }
+  }
+
+  function startRename(ip) {
+    const row = els.list.querySelector(`.peer-row[data-ip="${CSS.escape(ip)}"]`);
+    if (!row) {
+      return;
+    }
+    const peer = peerByIp(ip);
+    if (!peer) {
+      return;
+    }
+    cancelRename(false);
+    setBusy(true);
+    selectRow(ip);
+    const nameCell = row.querySelector(".peer-name");
+    nameCell.innerHTML = "";
+    const input = document.createElement("input");
+    input.className = "rename-input";
+    input.type = "text";
+    input.value = peer.name;
+    nameCell.appendChild(input);
+    renameInput = input;
+    input.focus();
+    input.select();
+
+    const commit = async () => {
+      if (!renameInput) {
+        return;
+      }
+      const next = input.value.trim();
+      const current = peer.name;
+      renameInput = null;
+      setBusy(false);
+      if (next && next !== current) {
+        await apiCall("rename_peer", ip, next);
+      }
+      await refreshNow();
+    };
+
+    const cancel = () => {
+      cancelRename(true);
+    };
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener("blur", () => {
+      if (renameInput === input) {
+        commit();
+      }
+    });
+  }
+
+  function cancelRename(refresh) {
+    if (!renameInput) {
+      setBusy(false);
+      if (refresh) {
+        refreshNow();
+      }
+      return;
+    }
+    renameInput = null;
+    setBusy(false);
+    if (refresh) {
+      refreshNow();
+    }
+  }
+
+  function openContextMenu(x, y, ip) {
+    const peer = peerByIp(ip);
+    if (!peer) {
+      return;
+    }
+    contextIp = ip;
+    selectRow(ip);
+    const items = [];
+    items.push({ label: "Renomear", action: "rename" });
+    items.push({ sep: true });
+    items.push({ label: "Mover para o topo", action: "top" });
+    items.push({ sep: true });
+    if (peer.hidden) {
+      items.push({ label: "Mostrar dispositivo", action: "show" });
+    } else {
+      items.push({ label: "Ocultar dispositivo", action: "hide", danger: true });
+      if (peer.muted) {
+        items.push({ label: "Ativar notificações", action: "unmute" });
+      } else {
+        items.push({ label: "Silenciar notificações", action: "mute" });
+      }
+    }
+
+    els.menu.innerHTML = items
+      .map((item) => {
+        if (item.sep) {
+          return `<div class="sep"></div>`;
+        }
+        const danger = item.danger ? " danger" : "";
+        return `<button type="button" data-action="${item.action}" class="${danger.trim()}">${item.label}</button>`;
+      })
+      .join("");
+
+    els.menu.classList.remove("hidden");
+    const rect = els.menu.getBoundingClientRect();
+    const left = Math.min(x, window.innerWidth - rect.width - 8);
+    const top = Math.min(y, window.innerHeight - rect.height - 8);
+    els.menu.style.left = `${Math.max(8, left)}px`;
+    els.menu.style.top = `${Math.max(8, top)}px`;
+  }
+
+  async function handleContextAction(action) {
+    const ip = contextIp || selectedIp;
+    hideMenu();
+    if (!ip) {
+      return;
+    }
+    if (action === "rename") {
+      startRename(ip);
+      return;
+    }
+    if (action === "top") {
+      await apiCall("move_peer_to_top", ip);
+    } else if (action === "hide") {
+      await apiCall("set_hidden", ip, true);
+    } else if (action === "show") {
+      await apiCall("set_hidden", ip, false);
+    } else if (action === "mute") {
+      await apiCall("set_muted", ip, true);
+    } else if (action === "unmute") {
+      await apiCall("set_muted", ip, false);
+    }
+    await refreshNow();
+  }
+
+  async function refreshNow() {
+    const snap = await apiCall("refresh_now");
+    applySnapshot(snap);
+  }
+
+  async function tick() {
+    if (!apiReady || busy) {
+      return;
+    }
+    const snap = await apiCall("get_snapshot");
+    applySnapshot(snap);
+  }
+
+  els.btnRefresh.addEventListener("click", () => {
+    refreshNow();
+  });
+
+  els.chkNotifications.addEventListener("change", async () => {
+    await apiCall("set_notifications", els.chkNotifications.checked);
+    await refreshNow();
+  });
+
+  els.chkHidden.addEventListener("change", async () => {
+    await apiCall("set_show_hidden", els.chkHidden.checked);
+    await refreshNow();
+  });
+
+  els.list.addEventListener("click", (event) => {
+    const row = event.target.closest(".peer-row");
+    if (!row) {
+      return;
+    }
+    selectRow(row.dataset.ip);
+  });
+
+  els.list.addEventListener("dblclick", (event) => {
+    const row = event.target.closest(".peer-row");
+    if (!row || event.target.closest("input")) {
+      return;
+    }
+    startRename(row.dataset.ip);
+  });
+
+  els.list.addEventListener("contextmenu", (event) => {
+    const row = event.target.closest(".peer-row");
+    if (!row) {
+      return;
+    }
+    event.preventDefault();
+    openContextMenu(event.clientX, event.clientY, row.dataset.ip);
+  });
+
+  els.menu.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) {
+      return;
+    }
+    handleContextAction(button.dataset.action);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!els.menu.contains(event.target)) {
+      hideMenu();
+    }
+  });
+
+  document.addEventListener("keydown", async (event) => {
+    if (renameInput) {
+      return;
+    }
+    if (event.key === "F2" && selectedIp) {
+      event.preventDefault();
+      startRename(selectedIp);
+      return;
+    }
+    if (event.key === "Delete" && selectedIp) {
+      event.preventDefault();
+      await apiCall("set_hidden", selectedIp, true);
+      await refreshNow();
+    }
+  });
+
+  els.list.addEventListener("dragstart", (event) => {
+    const row = event.target.closest(".peer-row");
+    if (!row) {
+      return;
+    }
+    dragIp = row.dataset.ip;
+    setBusy(true);
+    row.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dragIp);
+  });
+
+  els.list.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const row = event.target.closest(".peer-row");
+    for (const item of els.list.querySelectorAll(".peer-row")) {
+      item.classList.toggle("drag-over", item === row);
+    }
+  });
+
+  els.list.addEventListener("dragleave", (event) => {
+    const row = event.target.closest(".peer-row");
+    if (row) {
+      row.classList.remove("drag-over");
+    }
+  });
+
+  els.list.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    const row = event.target.closest(".peer-row");
+    const targetIp = row ? row.dataset.ip : null;
+    const fromIp = dragIp;
+    dragIp = null;
+    for (const item of els.list.querySelectorAll(".peer-row")) {
+      item.classList.remove("drag-over", "dragging");
+    }
+    setBusy(false);
+    if (!fromIp) {
+      return;
+    }
+    if (targetIp && targetIp !== fromIp) {
+      await apiCall("move_peer", fromIp, targetIp);
+    } else if (!targetIp) {
+      await apiCall("move_peer", fromIp, null);
+    }
+    await refreshNow();
+  });
+
+  els.list.addEventListener("dragend", () => {
+    dragIp = null;
+    setBusy(false);
+    for (const item of els.list.querySelectorAll(".peer-row")) {
+      item.classList.remove("drag-over", "dragging");
+    }
+  });
+
+  window.addEventListener("pywebviewready", async () => {
+    apiReady = true;
+    await refreshNow();
+    setInterval(tick, 3000);
+  });
+})();

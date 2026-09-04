@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Network Monitor</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <h1>Network Monitor</h1>
+            <p id="local-ips" class="muted">Detectando redes…</p>
+          </div>
+        </div>
+        <div id="summary-chips" class="chips" aria-live="polite"></div>
+      </header>
+
+      <div class="toolbar">
+        <button type="button" id="btn-refresh" class="btn">Atualizar agora</button>
+        <label class="toggle">
+          <input type="checkbox" id="chk-notifications" />
+          <span>Notificações</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="chk-hidden" />
+          <span>Mostrar ocultos</span>
+        </label>
+        <span id="updated-at" class="muted toolbar-right"></span>
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-head" role="row">
+          <span>Nome</span>
+          <span>IP</span>
+          <span>Status</span>
+        </div>
+        <div id="peer-list" class="peer-list" role="list"></div>
+        <div id="empty-state" class="empty-state hidden">
+          <p class="empty-title">Nenhum peer configurado</p>
+          <p class="muted">
+            Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática.
+          </p>
+        </div>
+      </div>
+
+      <footer class="footer muted">
+        Arraste para reordenar · Duplo clique ou F2 renomeia · Delete oculta · Clique direito para mais ações
+      </footer>
+    </div>
+
+    <div id="context-menu" class="context-menu hidden" role="menu"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

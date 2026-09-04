@@ -13,7 +13,7 @@ Antes de implementar: leia **`.cursor/skills/project/SKILL.md`**, depois a skill
 |------|----------------|-------|
 | Schema JSON | `config-schema` | `.cursor/skills/config-schema/SKILL.md` |
 | Monitor / tray / CLI | `python-monitor` | `.cursor/skills/python-monitor/SKILL.md` |
-| Painel tkinter | `python-gui` | `.cursor/skills/python-gui/SKILL.md` |
+| Painel WebView2 | `python-gui` | `.cursor/skills/python-gui/SKILL.md` |
 | Core C++ | `cpp-core` | `.cursor/skills/cpp-core/SKILL.md` |
 | CI/CD | `ci-cd` | `.cursor/skills/ci-cd/SKILL.md` |
 

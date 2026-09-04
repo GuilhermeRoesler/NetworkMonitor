@@ -1303,12 +1303,14 @@ def run_with_tray() -> None:
         ),
     )
 
+    tray_thread = threading.Thread(target=icon.run, daemon=True, name="radmin-tray")
+    tray_thread.start()
     logging.info("Ícone da bandeja ativo.")
-    icon.run()
+
+    # pywebview exige a thread principal.
+    status_window.run_main_loop(close_hides=True, start_hidden=True)
 
     stop_event.set()
-    status_window.close()
-    status_window.wait_closed(timeout=2)
     monitor_thread.join(timeout=3)
 
 
@@ -1484,8 +1486,7 @@ def main() -> None:
             name="radmin-monitor",
         )
         monitor_thread.start()
-        status_window.show(close_hides=False)
-        status_window.wait_closed()
+        status_window.run_main_loop(close_hides=False, start_hidden=False)
         stop_event.set()
         monitor_thread.join(timeout=3)
         return

@@ -14,7 +14,7 @@ App **Windows** que monitora peers **Radmin VPN** (`26.*`) e **LAN** (RFC1918) v
 
 | Camada | Path | Papel |
 |--------|------|--------|
-| Primária | `python/` | Monitor, tray (`pystray`), toast (`winotify`), GUI (`tkinter`), startup |
+| Primária | `python/` | Monitor, tray (`pystray`), toast (`winotify`), GUI (WebView2/`pywebview`), startup |
 | Secundária | `cpp/` | Core CLI + UI Win32 (bandeja, toast, painel); sem startup |
 | Config | raiz | `peers.json`, `state.json`, `monitor.log` — compartilhados |
 | CI/CD | `.github/workflows/` | `ci.yml` (PR), `cd.yml` (tags `v*`) |
@@ -28,7 +28,8 @@ Não portar para Linux/macOS sem pedido explícito.
 ```
 run.bat / run.sh          → python/
 python/main.py            lógica + CLI + bandeja
-python/gui.py             StatusWindow
+python/gui.py             StatusWindow (pywebview)
+python/ui/                HTML/CSS/JS do painel
 python/build.py           PyInstaller onedir
 python/tests/             pytest
 cpp/                      CMake → NetworkMonitorCpp.exe
@@ -47,11 +48,11 @@ Config/state/log sempre em `DATA_DIR`.
 
 | Thread | Nome | Função |
 |--------|------|--------|
-| Principal | — | `pystray.Icon.run` (modo bandeja) |
+| Principal | — | `webview.start` (painel) |
 | Daemon | `radmin-monitor` | `run_monitor_loop` |
-| Daemon | `radmin-gui` | loop tkinter |
+| Daemon | `radmin-tray` | `pystray.Icon.run` |
 
-Shutdown: `stop_event` → fechar GUI → `icon.stop()` → `join(5)`.
+Shutdown: `stop_event` → `status_window.close()` → `icon.stop()` → join monitor.
 
 ## Skills por área
 
@@ -59,7 +60,7 @@ Shutdown: `stop_event` → fechar GUI → `icon.stop()` → `join(5)`.
 |------|-------|--------|
 | Schema JSON | `config-schema` | campos em `peers.json` / `state.json` |
 | Monitor Python | `python-monitor` | ping, descoberta, tray, toast, startup, CLI |
-| GUI | `python-gui` | painel tkinter |
+| GUI | `python-gui` | painel WebView2 |
 | C++ | `cpp-core` | core / CMake / ICMP / UI Win32 |
 | Pipelines | `ci-cd` | workflows, lint, release |
 

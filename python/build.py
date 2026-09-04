@@ -9,7 +9,9 @@ import PyInstaller.__main__
 
 APP_NAME = "NetworkMonitor"
 ROOT_DIR = Path(__file__).resolve().parent.parent
+PYTHON_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = ROOT_DIR / "assets"
+UI_DIR = PYTHON_DIR / "ui"
 ICON_ICO = ASSETS_DIR / "icon.ico"
 
 
@@ -25,11 +27,14 @@ def build_args() -> list[str]:
         "--collect-all=winotify",
         "--collect-all=pystray",
         "--collect-all=PIL",
+        "--collect-all=webview",
     ]
     if ICON_ICO.is_file():
         args.append(f"--icon={ICON_ICO}")
     if ASSETS_DIR.is_dir():
         args.append(f"--add-data={ASSETS_DIR}{sep}assets")
+    if UI_DIR.is_dir():
+        args.append(f"--add-data={UI_DIR}{sep}ui")
     if sys.platform == "win32":
         args.append("--windowed")
     return args

@@ -6,6 +6,7 @@ Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, desco
 
 - Windows
 - Python 3.10+ (versão principal)
+- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (painel Python; já incluso na maioria dos Windows 10/11)
 - CMake + compilador C++17 (versão nativa Win32 opcional)
 
 ## Instalação (release)

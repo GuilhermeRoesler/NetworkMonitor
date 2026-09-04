@@ -1,12 +1,14 @@
 ---
-description: GUI tkinter StatusWindow — leia a skill python-gui
-globs: python/gui.py
+description: GUI WebView2 StatusWindow — leia a skill python-gui
+globs:
+  - python/gui.py
+  - python/ui/**
 alwaysApply: false
 ---
 
 # Python GUI
 
-Ao alterar `python/gui.py` (painel, Treeview, DnD, rename, menus):
+Ao alterar `python/gui.py` ou `python/ui/` (painel, bridge, DnD, rename, menus):
 
 Leia e siga **`.cursor/skills/python-gui/SKILL.md`**.
 
