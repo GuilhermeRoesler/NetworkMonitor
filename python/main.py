@@ -643,10 +643,7 @@ def record_history_transition(
     online: bool,
     now: datetime | str | None = None,
 ) -> None:
-    if isinstance(now, str):
-        now_iso = now
-    else:
-        now_iso = _history_now_iso(now)
+    now_iso = now if isinstance(now, str) else _history_now_iso(now)
     if online:
         ensure_open_segment(history, ip, now_iso)
     else:
@@ -693,7 +690,9 @@ def prune_history(
                 continue
             if start < cutoff_iso:
                 start = cutoff_iso
-            kept.append({"start": start, "end": end if isinstance(end, str) or end is None else None})
+            kept.append(
+                {"start": start, "end": end if isinstance(end, str) or end is None else None}
+            )
         if kept:
             pruned[ip] = kept
     return pruned
@@ -1134,13 +1133,13 @@ def ensure_win32_app_user_model_id() -> bool:
     try:
         import ctypes
 
-        hr = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            WIN_APP_USER_MODEL_ID
-        )
+        hr = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WIN_APP_USER_MODEL_ID)
         if hr == 0:
             _win_app_id_set = True
             return True
-        logging.debug("SetCurrentProcessExplicitAppUserModelID falhou: HRESULT=0x%08X", hr & 0xFFFFFFFF)
+        logging.debug(
+            "SetCurrentProcessExplicitAppUserModelID falhou: HRESULT=0x%08X", hr & 0xFFFFFFFF
+        )
     except Exception:
         logging.debug("Falha ao definir AppUserModelID", exc_info=True)
     return False

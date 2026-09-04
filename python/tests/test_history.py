@@ -38,14 +38,10 @@ def test_record_transitions_and_persist(tmp_app_dir: Path) -> None:
     main.update_history_from_states(history, {}, {"26.0.0.2": True}, t0)
     assert history["26.0.0.2"] == [{"start": "2026-09-04T08:00:00", "end": None}]
 
-    main.update_history_from_states(
-        history, {"26.0.0.2": True}, {"26.0.0.2": False}, t1
-    )
+    main.update_history_from_states(history, {"26.0.0.2": True}, {"26.0.0.2": False}, t1)
     assert history["26.0.0.2"][-1]["end"] == "2026-09-04T09:00:00"
 
-    main.update_history_from_states(
-        history, {"26.0.0.2": False}, {"26.0.0.2": True}, t2
-    )
+    main.update_history_from_states(history, {"26.0.0.2": False}, {"26.0.0.2": True}, t2)
     assert history["26.0.0.2"][-1] == {"start": "2026-09-04T10:00:00", "end": None}
 
     main.save_history(history)

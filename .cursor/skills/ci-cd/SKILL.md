@@ -18,6 +18,7 @@ Runner: `windows-latest`.
 | `python` | matrix 3.10/3.12/3.13 · ruff check/format · compileall · pytest (`--cov-fail-under=35`) |
 | `cpp` | CMake Release · build · CTest · smoke `--status` |
 | `validate` | arquivos obrigatórios (inclui `README.md`) · runtime JSON/log **não** versionados |
+| Pages | `pages.yml` — copia `python/ui/` para GitHub Pages (demo visual) |
 
 ## CD — `.github/workflows/cd.yml`
 

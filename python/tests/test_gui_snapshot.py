@@ -10,6 +10,7 @@ def test_resolve_ui_dir_has_index() -> None:
     assert (ui_dir / "index.html").is_file()
     assert (ui_dir / "app.css").is_file()
     assert (ui_dir / "app.js").is_file()
+    assert (ui_dir / "demo-api.js").is_file()
 
 
 def test_status_label() -> None:

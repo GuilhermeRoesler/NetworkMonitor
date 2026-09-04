@@ -57,6 +57,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 - `python/build.py` empacota `ui/` (`--add-data`) e `--collect-all=webview`
 - Runtime WebView2 necessário no Windows alvo
+- **Demo estática:** `python/ui/demo-api.js` stubba `pywebview.api` em `*.github.io` ou `?demo=1` (não ativa no app real). Deploy: `.github/workflows/pages.yml`
 
 ## Não fazer
 

@@ -9,6 +9,19 @@
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
+    <div id="demo-banner" class="demo-banner hidden" role="status">
+      <span class="demo-banner-pill">Demo</span>
+      <span class="demo-banner-text">
+        Dados fictícios — o monitor real (ping, bandeja e toasts) é o app Windows.
+      </span>
+      <a
+        class="demo-banner-link"
+        href="https://github.com/GuilhermeRoesler/NetworkMonitor/releases"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Baixar release</a
+      >
+    </div>
     <div class="app-bg" aria-hidden="true"></div>
     <div class="app">
       <header class="header">
@@ -224,6 +237,7 @@
     </div>
 
     <div id="context-menu" class="context-menu hidden" role="menu"></div>
+    <script src="demo-api.js"></script>
     <script src="vendor/Sortable.min.js"></script>
     <script src="app.js"></script>
   </body>

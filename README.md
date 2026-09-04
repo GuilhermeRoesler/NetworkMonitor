@@ -2,6 +2,20 @@
 
 Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos na sub-rede `/24` e notifica quando alguém fica online ou offline.
 
+## Demo do painel
+
+A UI em `python/ui/` roda no browser com dados fictícios (sem ping real):
+
+1. Sirva a pasta e abra com `?demo=1`, por exemplo:
+   ```powershell
+   cd python\ui
+   python -m http.server 8080
+   ```
+   Depois abra http://localhost:8080/?demo=1
+2. **GitHub Pages** — workflow `.github/workflows/pages.yml` publica a mesma UI em  
+   https://guilhermeroesler.github.io/NetworkMonitor/  
+   (Pages em repositório **privado** exige plano pago; com repo **público** basta ativar *Settings → Pages → Source: GitHub Actions*.)
+
 ## Requisitos
 
 - Windows
@@ -113,6 +127,7 @@ pytest
 ```
 
 CI em `.github/workflows/ci.yml`. Releases em tags `v*` via `cd.yml` (Setup.exe + zips).
+Demo estática do painel em GitHub Pages via `pages.yml` (`python/ui/`, ativa automaticamente em `*.github.io`).
 
 ## Specs para agentes
 
