@@ -26,3 +26,14 @@ def test_win_window_icon_sizes_never_uses_16(monkeypatch) -> None:
     small, big = main.win_window_icon_sizes()
     assert small >= 32
     assert big > small
+
+
+def test_ensure_win32_app_user_model_id_is_idempotent(monkeypatch) -> None:
+    main._win_app_id_set = False
+    if main.sys.platform != "win32":
+        assert main.ensure_win32_app_user_model_id() is False
+        return
+    assert main.ensure_win32_app_user_model_id() is True
+    assert main._win_app_id_set is True
+    assert main.ensure_win32_app_user_model_id() is True
+    assert main.WIN_APP_USER_MODEL_ID == "Gui.NetworkMonitor"

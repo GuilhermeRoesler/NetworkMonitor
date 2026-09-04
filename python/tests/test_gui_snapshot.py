@@ -44,6 +44,14 @@ def test_close_allows_destroy_when_close_hides() -> None:
     assert window._on_closing() is True
 
 
+def test_copy_text_uses_clipboard() -> None:
+    from gui import GuiApi, StatusWindow
+
+    api = GuiApi(StatusWindow())
+    assert api.copy_text("") is False
+    assert api.copy_text("192.168.0.10") is True
+
+
 def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     import main
 

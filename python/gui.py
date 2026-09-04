@@ -219,6 +219,7 @@ class StatusWindow:
             try:
                 window.show()
                 window.restore()
+                self._apply_window_icon()
             except Exception:
                 logging.exception("Falha ao exibir o painel WebView")
 
@@ -247,6 +248,15 @@ class StatusWindow:
             )
             return
 
+        from main import (
+            ICON_ICO_NAME,
+            ensure_win32_app_user_model_id,
+            resolve_asset_path,
+        )
+
+        # Obrigatório antes de create_window/start — senão a taskbar fica com o Python.
+        ensure_win32_app_user_model_id()
+
         ui_dir = resolve_ui_dir()
         index = ui_dir / "index.html"
         if not index.is_file():
@@ -257,6 +267,7 @@ class StatusWindow:
             self._close_hides = close_hides
             hidden = start_hidden and not self._want_visible
 
+        ico = resolve_asset_path(ICON_ICO_NAME)
         self._api = GuiApi(self)
         self._window = webview.create_window(
             title=APP_NAME,
@@ -274,9 +285,6 @@ class StatusWindow:
         self._closed.clear()
         self._loop_running.set()
 
-        from main import ICON_ICO_NAME, resolve_asset_path
-
-        ico = resolve_asset_path(ICON_ICO_NAME)
         start_kwargs: dict = {"debug": False}
         if ico is not None:
             start_kwargs["icon"] = str(ico)
@@ -325,6 +333,19 @@ class StatusWindow:
         except Exception:
             return 0
 
+    def _apply_native_form_icon(self, ico: Path) -> None:
+        """Define System.Drawing.Icon na Form WinForms (além do WM_SETICON)."""
+        window = self._window
+        native = getattr(window, "native", None) if window is not None else None
+        if native is None:
+            return
+        try:
+            from System.Drawing import Icon as DrawingIcon
+
+            native.Icon = DrawingIcon(str(ico))
+        except Exception:
+            logging.debug("Falha ao definir Form.Icon", exc_info=True)
+
     def _apply_window_icon(self) -> None:
         if sys.platform != "win32":
             return
@@ -334,6 +355,7 @@ class StatusWindow:
             ico = resolve_asset_path(ICON_ICO_NAME)
             if ico is None:
                 return
+            self._apply_native_form_icon(ico)
             hwnd = self._resolve_window_hwnd()
             if not hwnd:
                 return

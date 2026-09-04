@@ -77,6 +77,8 @@ HISTORY_RETENTION_MAX = 90
 HISTORY_RETENTION_DEFAULT = 7
 ICON_PNG_NAME = "icon.png"
 ICON_ICO_NAME = "icon.ico"
+# Sem espaços — Windows agrupa a taskbar por este ID (não pelo python.exe).
+WIN_APP_USER_MODEL_ID = "Gui.NetworkMonitor"
 
 
 def resolve_asset_path(name: str) -> Path | None:
@@ -1121,6 +1123,27 @@ def uninstall_startup() -> None:
 # Tamanhos gerados em assets/_generate_icon.py
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 TRAY_ICON_SIZE = 64  # pystray/Windows reduzem bem; 16px é ampliado na DPI e fica pixelado
+_win_app_id_set = False
+
+
+def ensure_win32_app_user_model_id() -> bool:
+    """Desassocia o processo do python.exe na taskbar. Chamar antes de qualquer UI."""
+    global _win_app_id_set
+    if _win_app_id_set or sys.platform != "win32":
+        return _win_app_id_set
+    try:
+        import ctypes
+
+        hr = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            WIN_APP_USER_MODEL_ID
+        )
+        if hr == 0:
+            _win_app_id_set = True
+            return True
+        logging.debug("SetCurrentProcessExplicitAppUserModelID falhou: HRESULT=0x%08X", hr & 0xFFFFFFFF)
+    except Exception:
+        logging.debug("Falha ao definir AppUserModelID", exc_info=True)
+    return False
 
 
 def _win_effective_dpi() -> int:
@@ -1214,18 +1237,28 @@ def set_win32_window_icons(hwnd: int, ico_path: Path) -> tuple[int, int] | None:
 
         small, big = win_window_icon_sizes()
         path = str(ico_path)
-        h_small = load_image(None, path, 1, small, small, 0x0010)  # IMAGE_ICON, LR_LOADFROMFILE
-        h_big = load_image(None, path, 1, big, big, 0x0010)
+        h_small = int(load_image(None, path, 1, small, small, 0x0010) or 0)
+        h_big = int(load_image(None, path, 1, big, big, 0x0010) or 0)
         if not h_small and not h_big:
             return None
-        send = user32.SendMessageW
-        send.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-        send.restype = wintypes.LPARAM
+
+        # WM_SETICON
         if h_small:
-            send(hwnd, 0x0080, 0, ctypes.cast(h_small, ctypes.c_void_p).value or 0)
+            user32.SendMessageW(hwnd, 0x0080, 0, h_small)
         if h_big:
-            send(hwnd, 0x0080, 1, ctypes.cast(h_big, ctypes.c_void_p).value or 0)
-        return (int(h_small) if h_small else 0, int(h_big) if h_big else 0)
+            user32.SendMessageW(hwnd, 0x0080, 1, h_big)
+
+        # Ícone da classe — a taskbar às vezes lê daí em vez do HWND.
+        if hasattr(user32, "SetClassLongPtrW"):
+            set_class = user32.SetClassLongPtrW
+        else:
+            set_class = user32.SetClassLongW
+        if h_big:
+            set_class(hwnd, -14, h_big)  # GCLP_HICON
+        if h_small:
+            set_class(hwnd, -34, h_small)  # GCLP_HICONSM
+
+        return (h_small, h_big)
     except Exception:
         return None
 
@@ -1657,6 +1690,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    # Antes de tray/WebView — senão a taskbar usa o ícone do python.exe.
+    ensure_win32_app_user_model_id()
 
     if args.install:
         install_startup()

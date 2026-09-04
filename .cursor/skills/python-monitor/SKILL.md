@@ -71,6 +71,8 @@ Tray roda em daemon `radmin-tray`; a thread principal fica em `status_window.run
 
 Ícone tray: `create_tray_icon_image` usa o frame **64px** de `assets/icon.ico` (não 16px — `GetSystemMetrics` sem DPI awareness devolve 16 e o Windows amplia). Toast/build: `icon.png` / `icon.ico` via `resolve_asset_path`.
 
+Taskbar em dev: `ensure_win32_app_user_model_id()` (`Gui.NetworkMonitor`) no início de `main()` — sem AppUserModelID próprio o Windows mostra o ícone do `python.exe`.
+
 ## APIs usadas pela GUI
 
 `update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`.
