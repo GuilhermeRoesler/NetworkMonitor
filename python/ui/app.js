@@ -67,6 +67,8 @@
   let searchQuery = "";
   let density = "comfortable";
   let searchTimer = null;
+  let pollMs = 15000;
+  let pollTimer = null;
 
   function statusClass(status) {
     return STATUS_CLASS[status] || "unknown";
@@ -967,6 +969,7 @@
       return;
     }
     snapshot = snap;
+    syncPollInterval(snap.interval_seconds);
     els.localIps.textContent = snap.local_ips || "Nenhuma rede detectada";
     const nextStamp = snap.updated_at ? `Atualizado às ${snap.updated_at}` : "";
     if (nextStamp && nextStamp !== els.updatedAt.textContent) {
@@ -978,6 +981,18 @@
     setRetentionUi(snap.history_retention_days || 7);
     renderChips(snap);
     renderPeers(snap);
+  }
+
+  function syncPollInterval(seconds) {
+    const nextMs = Math.max(1, Number(seconds) || 15) * 1000;
+    if (nextMs === pollMs && pollTimer !== null) {
+      return;
+    }
+    pollMs = nextMs;
+    if (pollTimer !== null) {
+      window.clearInterval(pollTimer);
+    }
+    pollTimer = window.setInterval(tick, pollMs);
   }
 
   window.updateSnapshot = applySnapshot;
@@ -1439,7 +1454,9 @@
     setRetentionUi(7);
     clearStartupFocus();
     await refreshNow();
-    setInterval(tick, 3000);
+    if (pollTimer === null) {
+      syncPollInterval(15);
+    }
     updateScrollFades();
   });
 })();

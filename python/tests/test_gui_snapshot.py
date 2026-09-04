@@ -100,6 +100,7 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     assert snap["lan_ip"] == "192.168.0.5"
     assert snap["lan_ips"] == ["192.168.0.5", "10.0.0.2"]
     assert "Wi-Fi: 10.0.0.2" in snap["local_ips"]
+    assert snap["interval_seconds"] == 15
     assert snap["notifications_enabled"] is True
     assert snap["history_retention_days"] == 7
     assert snap["online_count"] == 1

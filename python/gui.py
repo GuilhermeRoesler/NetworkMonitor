@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 
 APP_NAME = "Network Monitor"
-REFRESH_MS = 3000
 WINDOW_WIDTH = 750
 WINDOW_HEIGHT = 850
 
@@ -153,6 +152,7 @@ def build_snapshot(*, show_hidden: bool) -> dict:
         "lan_ip": lan_ip,
         "lan_ips": lan_ips,
         "local_ips": local_ips,
+        "interval_seconds": config.interval_seconds,
         "notifications_enabled": config.notifications_enabled,
         "history_retention_days": config.history_retention_days,
         "show_hidden": show_hidden,

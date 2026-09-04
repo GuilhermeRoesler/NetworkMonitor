@@ -15,7 +15,7 @@ description: >-
 - **`run_main_loop()` na thread principal** (`webview.start` — exigência do pywebview)
 - Modo bandeja: tray em daemon `radmin-tray`; painel inicia oculto até `show()`
 - Frontend: `python/ui/index.html` + `app.css` + `app.js` (vanilla)
-- Snapshot a cada ~3s via JS (`get_snapshot`) ou `refresh_now`
+- Snapshot a cada `interval_seconds` (padrão 15s) via JS — alinhado ao ciclo do monitor
 - Lê/grava estado via imports de `nm.*` (`config`, `state`, `history`, `network`, `identity`, `paths`, `win32_ui`)
 
 ## UI
@@ -36,7 +36,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 - Persistência só via `GuiApi` → funções de `nm.config` / `nm.history` / etc.
 - JS marca `busy` durante rename/drag e ignora snapshots nesse intervalo
-- Histórico via `get_peer_history(ip)` (não no snapshot de 3s); expansão preservada no re-render
+- Histórico via `get_peer_history(ip)` (não no snapshot periódico); expansão preservada no re-render
 - `run_main_loop` / `webview.start` apenas na thread principal
 - `show()` / `close()` podem ser chamados a partir da thread da bandeja
 

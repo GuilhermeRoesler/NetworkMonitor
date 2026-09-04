@@ -58,7 +58,6 @@ private:
     std::string context_ip_;
 
     static constexpr UINT_PTR kRefreshTimerId = 1001;
-    static constexpr int kRefreshMs = 3000;
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT handle_message(UINT message, WPARAM wparam, LPARAM lparam);

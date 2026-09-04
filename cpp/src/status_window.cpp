@@ -33,6 +33,11 @@ constexpr int kMenuShow = 3004;
 constexpr int kMenuMute = 3005;
 constexpr int kMenuUnmute = 3006;
 
+UINT refresh_interval_ms() {
+    const int seconds = (std::max)(1, load_config().interval_seconds);
+    return static_cast<UINT>(seconds * 1000);
+}
+
 const COLORREF kColorBg = RGB(246, 248, 250);
 const COLORREF kColorCard = RGB(255, 255, 255);
 const COLORREF kColorText = RGB(36, 41, 47);
@@ -211,7 +216,7 @@ LRESULT StatusWindow::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         case WM_CREATE:
             build_controls();
             SetWindowPos(hwnd_, nullptr, 0, 0, 640, 520, SWP_NOMOVE | SWP_NOZORDER);
-            SetTimer(hwnd_, kRefreshTimerId, kRefreshMs, nullptr);
+            SetTimer(hwnd_, kRefreshTimerId, refresh_interval_ms(), nullptr);
             return 0;
         case WM_GETMINMAXINFO: {
             auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -696,6 +701,7 @@ void StatusWindow::refresh_now(bool force_network) {
     }
 
     const auto config = load_config();
+    SetTimer(hwnd_, kRefreshTimerId, static_cast<UINT>((std::max)(1, config.interval_seconds) * 1000), nullptr);
     snapshot_.peers = config.all_peers();
     snapshot_.state = load_state();
     if (force_network || !has_snapshot_) {
