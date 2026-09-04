@@ -64,7 +64,7 @@ Sem `--install`. Help em português.
 ## Paridade com Python
 
 - Mesmos defaults e campos JSON (ver skill `config-schema`)
-- Mesmas regras Radmin (`26.*`, gateway `26.0.0.1`) e LAN (RFC1918, skip APIPA)
+- Mesmas regras Radmin (`26.*`, gateway `26.0.0.1`) e LAN (RFC1918, skip APIPA/virtuais; **todas** as interfaces LAN via `list_local_interfaces` / `get_lan_ips`)
 - Transições de estado equivalentes; toast nativo quando UI ativa
 - Painel: rename, ocultar/mostrar, mute, reorder (paridade com `python/gui.py`)
 

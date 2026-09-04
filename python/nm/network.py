@@ -1,4 +1,4 @@
-"""Detecção de IPs locais (Radmin VPN e LAN)."""
+"""Detecção de IPs locais (Radmin VPN e interfaces LAN)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import socket
 import struct
 import subprocess
 import winreg
+from dataclasses import dataclass
 
 RADMIN_REG_PATHS = (
     r"SOFTWARE\WOW6432Node\Famatech\RadminVPN\1.0",
@@ -16,6 +17,14 @@ RADMIN_REG_PATHS = (
 
 RADMIN_GATEWAYS = {"26.0.0.1"}
 LAN_SKIP_PREFIXES = ("169.254.",)  # APIPA / link-local
+ADAPTER_SKIP_TOKENS = (
+    "loopback",
+    "vethernet",
+    "vmware",
+    "hyper-v",
+    "virtualbox",
+    "virtual",
+)
 PRIVATE_NETWORKS = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -23,47 +32,17 @@ PRIVATE_NETWORKS = (
 )
 
 
+@dataclass(frozen=True)
+class LocalInterface:
+    """Adaptador local utilizável para scan (Radmin ou LAN privada)."""
+
+    name: str
+    ip: str
+    network_type: str  # "radmin" | "lan"
+
+
 def dword_to_ip(value: int) -> str:
     return socket.inet_ntoa(struct.pack("!I", value & 0xFFFFFFFF))
-
-
-def get_radmin_ip() -> str | None:
-    for reg_path in RADMIN_REG_PATHS:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path) as key:
-                value, _ = winreg.QueryValueEx(key, "IPv4")
-                return dword_to_ip(int(value))
-        except OSError:
-            continue
-
-    try:
-        result = subprocess.run(
-            ["ipconfig"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-        )
-        block = None
-        for line in result.stdout.splitlines():
-            if "Radmin VPN" in line:
-                block = []
-                continue
-            if block is not None:
-                if line.strip() == "" and block:
-                    break
-                block.append(line)
-
-        if block:
-            for line in block:
-                match = re.search(r"IPv4[^:]*:\s*([\d.]+)", line)
-                if match:
-                    return match.group(1)
-    except (subprocess.SubprocessError, OSError):
-        pass
-
-    return None
 
 
 def is_private_ip(ip: str) -> bool:
@@ -78,7 +57,104 @@ def is_radmin_ip(ip: str) -> bool:
     return ip.startswith("26.")
 
 
-def get_lan_ip() -> str | None:
+def _should_skip_adapter(name: str) -> bool:
+    lower = name.lower()
+    if "radmin" in lower:
+        return False
+    return any(token in lower for token in ADAPTER_SKIP_TOKENS)
+
+
+def parse_ipconfig_interfaces(text: str) -> list[LocalInterface]:
+    """Extrai interfaces IPv4 úteis do stdout de `ipconfig` (PT/EN)."""
+    current_adapter = ""
+    results: list[LocalInterface] = []
+    seen_ips: set[str] = set()
+
+    for line in text.splitlines():
+        if line and not line.startswith((" ", "\t")):
+            current_adapter = line.strip().rstrip(":")
+            continue
+
+        if not current_adapter or _should_skip_adapter(current_adapter):
+            continue
+
+        match = re.search(r"IPv4[^:]*:\s*([\d.]+)", line)
+        if not match:
+            continue
+
+        candidate = match.group(1)
+        if candidate.startswith(LAN_SKIP_PREFIXES) or candidate in seen_ips:
+            continue
+
+        adapter_lower = current_adapter.lower()
+        if is_radmin_ip(candidate) or "radmin" in adapter_lower:
+            network_type = "radmin"
+        elif is_private_ip(candidate):
+            network_type = "lan"
+        else:
+            continue
+
+        seen_ips.add(candidate)
+        results.append(
+            LocalInterface(name=current_adapter, ip=candidate, network_type=network_type)
+        )
+
+    return results
+
+
+def _radmin_from_registry() -> str | None:
+    for reg_path in RADMIN_REG_PATHS:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path) as key:
+                value, _ = winreg.QueryValueEx(key, "IPv4")
+                return dword_to_ip(int(value))
+        except OSError:
+            continue
+    return None
+
+
+def _run_ipconfig() -> str:
+    result = subprocess.run(
+        ["ipconfig"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    return result.stdout
+
+
+def list_local_interfaces() -> list[LocalInterface]:
+    """Lista adaptadores locais (Radmin + LANs privadas), dinamicamente."""
+    interfaces: list[LocalInterface] = []
+    try:
+        interfaces = parse_ipconfig_interfaces(_run_ipconfig())
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+    radmin_ip = _radmin_from_registry()
+    if radmin_ip and not any(iface.ip == radmin_ip for iface in interfaces):
+        interfaces.insert(
+            0,
+            LocalInterface(name="Radmin VPN", ip=radmin_ip, network_type="radmin"),
+        )
+
+    return interfaces
+
+
+def get_radmin_ip() -> str | None:
+    radmin_ip = _radmin_from_registry()
+    if radmin_ip:
+        return radmin_ip
+
+    for iface in list_local_interfaces():
+        if iface.network_type == "radmin":
+            return iface.ip
+    return None
+
+
+def _lan_from_udp() -> str | None:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect(("8.8.8.8", 80))
@@ -87,53 +163,74 @@ def get_lan_ip() -> str | None:
                 return candidate
     except OSError:
         pass
-
-    try:
-        result = subprocess.run(
-            ["ipconfig"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-        )
-        current_adapter = ""
-        for line in result.stdout.splitlines():
-            if line and not line.startswith(" "):
-                current_adapter = line.strip().rstrip(":")
-                continue
-
-            adapter_lower = current_adapter.lower()
-            if any(
-                skip in adapter_lower
-                for skip in ("radmin", "loopback", "virtual", "vethernet", "vmware", "hyper-v")
-            ):
-                continue
-
-            match = re.search(r"IPv4[^:]*:\s*([\d.]+)", line)
-            if not match:
-                continue
-
-            candidate = match.group(1)
-            if candidate.startswith(LAN_SKIP_PREFIXES):
-                continue
-            if is_private_ip(candidate) and not is_radmin_ip(candidate):
-                return candidate
-    except (subprocess.SubprocessError, OSError):
-        pass
-
     return None
 
 
-def get_local_ip(network_type: str) -> str | None:
+def get_lan_ips() -> list[str]:
+    """Todos os IPs LAN privados detectados (sem Radmin), preferindo a rota padrão."""
+    ips: list[str] = []
+    seen: set[str] = set()
+    for iface in list_local_interfaces():
+        if iface.network_type != "lan" or iface.ip in seen:
+            continue
+        seen.add(iface.ip)
+        ips.append(iface.ip)
+
+    preferred = _lan_from_udp()
+    if preferred and preferred in ips:
+        ips.remove(preferred)
+        ips.insert(0, preferred)
+    elif preferred and preferred not in seen:
+        ips.insert(0, preferred)
+    return ips
+
+
+def get_lan_ip() -> str | None:
+    """IP LAN principal (rota padrão ou primeiro adaptador privado)."""
+    ips = get_lan_ips()
+    return ips[0] if ips else None
+
+
+def get_local_ips(network_type: str) -> list[str]:
     if network_type == "lan":
-        return get_lan_ip()
-    return get_radmin_ip()
+        return get_lan_ips()
+    radmin = get_radmin_ip()
+    return [radmin] if radmin else []
+
+
+def get_local_ip(network_type: str) -> str | None:
+    ips = get_local_ips(network_type)
+    return ips[0] if ips else None
+
+
+def format_local_interfaces(interfaces: list[LocalInterface] | None = None) -> str:
+    """Texto curto para status/GUI: 'Radmin VPN: 26… · Ethernet: 192…'."""
+    ifaces = interfaces if interfaces is not None else list_local_interfaces()
+    if not ifaces:
+        return "Nenhuma rede detectada"
+    parts: list[str] = []
+    for iface in ifaces:
+        label = "Radmin" if iface.network_type == "radmin" else iface.name
+        parts.append(f"{label}: {iface.ip}")
+    return " · ".join(parts)
 
 
 def subnet_for_ip(ip: str) -> ipaddress.IPv4Network:
     address = ipaddress.IPv4Address(ip)
     return ipaddress.IPv4Network(f"{address}/24", strict=False)
+
+
+def unique_scan_ips(local_ips: list[str]) -> list[str]:
+    """Um IP representante por sub-rede /24 (evita scan duplicado)."""
+    seen_subnets: set[str] = set()
+    result: list[str] = []
+    for ip in local_ips:
+        key = str(subnet_for_ip(ip))
+        if key in seen_subnets:
+            continue
+        seen_subnets.add(key)
+        result.append(ip)
+    return result
 
 
 def skip_ips_for_network(network_type: str, local_ip: str) -> set[str]:

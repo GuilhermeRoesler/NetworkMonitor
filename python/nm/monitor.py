@@ -11,7 +11,14 @@ from nm.discover import discover_peers
 from nm.history import load_history, prune_history, save_history, update_history_from_states
 from nm.identity import enrich_online_peers, record_peer_ping
 from nm.models import MonitorConfig, NetworkConfig, Peer
-from nm.network import get_lan_ip, get_local_ip, get_radmin_ip, skip_ips_for_network, subnet_for_ip
+from nm.network import (
+    format_local_interfaces,
+    get_local_ips,
+    list_local_interfaces,
+    skip_ips_for_network,
+    subnet_for_ip,
+    unique_scan_ips,
+)
 from nm.notify import notify
 from nm.paths import APP_NAME
 from nm.ping import ping_hosts_parallel
@@ -71,16 +78,11 @@ def build_status_message() -> str:
     config = load_config()
     state = load_state()
 
-    radmin_ip = get_radmin_ip()
-    lan_ip = get_lan_ip()
-
-    lines = []
-    if radmin_ip:
-        lines.append(f"Radmin: {radmin_ip}")
-    if lan_ip:
-        lines.append(f"LAN: {lan_ip}")
-    if not lines:
+    interfaces = list_local_interfaces()
+    if not interfaces:
         return "Nenhuma rede detectada."
+
+    lines = [f"{iface.name}: {iface.ip}" for iface in interfaces]
 
     if not config.peers:
         lines.append("Nenhum peer configurado.")
@@ -111,27 +113,38 @@ def process_network(
     if not network.enabled:
         return [], last_scan, False
 
-    local_ip = get_local_ip(network.network_type)
-    if not local_ip:
+    local_ips = get_local_ips(network.network_type)
+    if not local_ips:
         logging.warning("Rede '%s' (%s) não detectada.", network.name, network.network_type)
         return [], last_scan, False
 
     peers = list(network.peers)
-    known_ips = known_global_ips | {local_ip}
+    known_ips = known_global_ips | set(local_ips)
     config_changed = False
+    scan_ips = unique_scan_ips(local_ips)
+
+    def _discover_all() -> list[Peer]:
+        found: list[Peer] = []
+        for local_ip in scan_ips:
+            if stop_event is not None and stop_event.is_set():
+                break
+            discovered = discover_peers(
+                local_ip,
+                known_ips,
+                skip_ips=skip_ips_for_network(network.network_type, local_ip),
+                stop_event=stop_event,
+            )
+            for peer in discovered:
+                peer.network_name = network.name
+                peer.network_type = network.network_type
+                known_ips.add(peer.ip)
+            found.extend(discovered)
+        return found
 
     if network.auto_discover and (now - last_scan) >= config.scan_interval_seconds:
         if stop_event is not None and stop_event.is_set():
             return peers, last_scan, False
-        discovered = discover_peers(
-            local_ip,
-            known_ips,
-            skip_ips=skip_ips_for_network(network.network_type, local_ip),
-            stop_event=stop_event,
-        )
-        for peer in discovered:
-            peer.network_name = network.name
-            peer.network_type = network.network_type
+        discovered = _discover_all()
         if discovered:
             persist_discovered_peers(network.name, discovered)
             config_changed = True
@@ -146,17 +159,9 @@ def process_network(
         logging.info(
             "Rede '%s' sem peers. Escaneando %s...",
             network.name,
-            subnet_for_ip(local_ip),
+            ", ".join(str(subnet_for_ip(ip)) for ip in scan_ips),
         )
-        discovered = discover_peers(
-            local_ip,
-            known_ips,
-            skip_ips=skip_ips_for_network(network.network_type, local_ip),
-            stop_event=stop_event,
-        )
-        for peer in discovered:
-            peer.network_name = network.name
-            peer.network_type = network.network_type
+        discovered = _discover_all()
         if discovered:
             persist_discovered_peers(network.name, discovered)
             config_changed = True
@@ -179,7 +184,7 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
         known_global_ips: set[str] = {p.ip for p in config.all_peers}
         config_changed = False
 
-        local_ips = [ip for ip in (get_radmin_ip(), get_lan_ip()) if ip]
+        local_ips = [iface.ip for iface in list_local_interfaces()]
         known_global_ips.update(local_ips)
 
         for network in config.networks:
@@ -211,7 +216,7 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
             if not active:
                 logging.warning("Nenhuma rede habilitada em peers.json.")
             elif not local_ips:
-                logging.warning("Nenhuma rede detectada (Radmin/LAN). Aguardando...")
+                logging.warning("Nenhuma rede detectada (interfaces). Aguardando...")
             else:
                 logging.info(
                     "Nenhum peer configurado ou encontrado. Próxima verificação em %ss.",
@@ -235,12 +240,11 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
         online_count = sum(1 for peer in visible_peers if state.get(peer.ip))
         hidden_count = len(config.hidden_peers)
         logging.info(
-            "Verificação concluída: %d/%d online (%d ocultos) · Radmin: %s · LAN: %s",
+            "Verificação concluída: %d/%d online (%d ocultos) · %s",
             online_count,
             len(visible_peers),
             hidden_count,
-            get_radmin_ip() or "—",
-            get_lan_ip() or "—",
+            format_local_interfaces(),
         )
         if stop_event.wait(config.interval_seconds):
             break

@@ -12,7 +12,15 @@ from nm.config import load_config, persist_discovered_peers
 from nm.discover import discover_peers
 from nm.logging_setup import setup_logging
 from nm.monitor import run_monitor_loop
-from nm.network import get_lan_ip, get_local_ip, get_radmin_ip, skip_ips_for_network, subnet_for_ip
+from nm.network import (
+    get_lan_ips,
+    get_local_ips,
+    get_radmin_ip,
+    list_local_interfaces,
+    skip_ips_for_network,
+    subnet_for_ip,
+    unique_scan_ips,
+)
 from nm.paths import APP_NAME
 from nm.startup import install_startup, uninstall_startup
 from nm.state import load_state
@@ -41,15 +49,16 @@ def run_console() -> None:
 
 def scan_network(network_type: str) -> bool:
     setup_logging()
-    local_ip = get_local_ip(network_type)
+    local_ips = get_local_ips(network_type)
     label = "Radmin VPN" if network_type == "radmin" else "LAN"
 
-    if not local_ip:
+    if not local_ips:
         print(f"{label} não encontrada. Verifique a conexão.")
         return False
 
-    print(f"IP local ({label}): {local_ip}")
-    print(f"Escaneando sub-rede {subnet_for_ip(local_ip)}...")
+    scan_ips = unique_scan_ips(local_ips)
+    print(f"IP(s) local(is) ({label}): {', '.join(local_ips)}")
+    print(f"Escaneando sub-rede(s) {', '.join(str(subnet_for_ip(ip)) for ip in scan_ips)}...")
 
     config = load_config()
     network = next(
@@ -60,23 +69,27 @@ def scan_network(network_type: str) -> bool:
         print(f"Nenhuma rede do tipo '{network_type}' habilitada em peers.json.")
         return False
 
-    known_ips = {peer.ip for peer in config.all_peers} | {local_ip}
-    discovered = discover_peers(
-        local_ip,
-        known_ips,
-        skip_ips=skip_ips_for_network(network_type, local_ip),
-    )
-    for peer in discovered:
-        peer.network_name = network.name
-        peer.network_type = network_type
-
-    if discovered:
-        persist_discovered_peers(network.name, discovered)
-        print(f"\n{len(discovered)} peer(s) encontrado(s) em '{network.name}':")
+    known_ips = {peer.ip for peer in config.all_peers} | set(local_ips)
+    discovered_all = []
+    for local_ip in scan_ips:
+        discovered = discover_peers(
+            local_ip,
+            known_ips,
+            skip_ips=skip_ips_for_network(network_type, local_ip),
+        )
         for peer in discovered:
+            peer.network_name = network.name
+            peer.network_type = network_type
+            known_ips.add(peer.ip)
+        discovered_all.extend(discovered)
+
+    if discovered_all:
+        persist_discovered_peers(network.name, discovered_all)
+        print(f"\n{len(discovered_all)} peer(s) encontrado(s) em '{network.name}':")
+        for peer in discovered_all:
             print(f"  - {peer.name} ({peer.ip})")
     else:
-        print(f"\nNenhum peer online encontrado na sub-rede {label}.")
+        print(f"\nNenhum peer online encontrado na(s) sub-rede(s) {label}.")
     return True
 
 
@@ -97,13 +110,19 @@ def scan_all() -> None:
 
 
 def show_status() -> None:
-    radmin_ip = get_radmin_ip()
-    lan_ip = get_lan_ip()
+    interfaces = list_local_interfaces()
     config = load_config()
     state = load_state()
 
-    print(f"IP Radmin: {radmin_ip or 'não detectado'}")
-    print(f"IP LAN:    {lan_ip or 'não detectado'}")
+    if interfaces:
+        print("Interfaces:")
+        for iface in interfaces:
+            print(f"  [{iface.network_type}] {iface.name}: {iface.ip}")
+    else:
+        print("Interfaces: nenhuma detectada")
+    print(f"IP Radmin: {get_radmin_ip() or 'não detectado'}")
+    lan_ips = get_lan_ips()
+    print(f"IP(s) LAN: {', '.join(lan_ips) if lan_ips else 'não detectado'}")
     print(f"Peers visíveis: {len(config.peers)}")
     print(f"Peers ocultos:  {len(config.hidden_peers)}")
     print(f"Intervalo de verificação: {config.interval_seconds}s")
@@ -142,8 +161,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--uninstall", action="store_true", help="Remove o atalho da pasta Startup do Windows"
     )
     parser.add_argument("--scan", action="store_true", help="Escaneia a sub-rede Radmin uma vez")
-    parser.add_argument("--scan-lan", action="store_true", help="Escaneia a sub-rede LAN uma vez")
-    parser.add_argument("--scan-all", action="store_true", help="Escaneia Radmin e LAN")
+    parser.add_argument(
+        "--scan-lan",
+        action="store_true",
+        help="Escaneia todas as sub-redes LAN detectadas uma vez",
+    )
+    parser.add_argument(
+        "--scan-all",
+        action="store_true",
+        help="Escaneia Radmin e todas as interfaces LAN",
+    )
     parser.add_argument("--status", action="store_true", help="Mostra status atual")
     parser.add_argument("--gui", action="store_true", help="Abre apenas o painel gráfico")
     return parser

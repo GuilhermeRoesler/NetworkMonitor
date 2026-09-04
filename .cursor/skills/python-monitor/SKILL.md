@@ -48,13 +48,18 @@ Dev: `python/requirements-dev.txt` (ruff, pytest)
 | Tipo | Fonte | Regra |
 |------|-------|-------|
 | `radmin` | Registry `Famatech\RadminVPN\1.0` → `IPv4`, fallback `ipconfig` | `26.*` |
-| `lan` | UDP connect `8.8.8.8`, fallback `ipconfig` | RFC1918; exclui Radmin e APIPA |
+| `lan` | `ipconfig` (todas as interfaces privadas) + preferência UDP `8.8.8.8` | RFC1918; exclui Radmin, APIPA e adaptadores virtuais |
 
-Constantes em `nm/network.py`:
+Constantes / helpers em `nm/network.py`:
 
+- `list_local_interfaces()` / `parse_ipconfig_interfaces()` — enumera adaptadores
+- `get_lan_ips()` — todos os IPs LAN; `get_lan_ip()` — principal
+- `unique_scan_ips()` — um representante por `/24` (evita scan duplicado)
 - `RADMIN_GATEWAYS = {"26.0.0.1"}` — skip no scan Radmin
-- `LAN_SKIP_PREFIXES = ("169.254.",)`
+- `LAN_SKIP_PREFIXES = ("169.254.",)` / `ADAPTER_SKIP_TOKENS` (loopback, Hyper-V, VMware, …)
 - Sub-rede sempre `/24` (`subnet_for_ip`)
+
+Scan LAN / auto-discover: percorre **todas** as interfaces LAN detectadas (não só a rota padrão).
 
 ## Ciclo de monitor (`nm.monitor.run_monitor_loop`)
 
@@ -94,7 +99,7 @@ Taskbar em dev: `ensure_win32_app_user_model_id()` (`Gui.NetworkMonitor`) no in�
 ## APIs usadas pela GUI
 
 Em `nm.config` / `nm.state` / `nm.history` / `nm.network` / `nm.identity`:  
-`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`, `get_peer_runtime`.
+`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`, `get_lan_ips`, `list_local_interfaces`, `format_local_interfaces`, `get_peer_runtime`.
 
 ## Onde mudar
 

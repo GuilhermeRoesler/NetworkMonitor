@@ -14,6 +14,8 @@ struct MonitorSnapshot {
     StateMap state;
     std::string radmin_ip;
     std::string lan_ip;
+    std::vector<std::string> lan_ips;
+    std::string local_ips;
     int visible_count{0};
     int hidden_count{0};
     int online_count{0};

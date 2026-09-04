@@ -8,9 +8,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <iphlpapi.h>
 
 #include <atomic>
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <mutex>
@@ -43,7 +43,6 @@ bool is_private_ip(const std::string& ip) {
 namespace {
 
 std::string dword_to_ip(DWORD value) {
-    // Registro Radmin guarda IPv4 em ordem de rede (big-endian dword)
     const unsigned a = (value >> 24) & 0xFF;
     const unsigned b = (value >> 16) & 0xFF;
     const unsigned c = (value >> 8) & 0xFF;
@@ -117,36 +116,21 @@ std::string run_ipconfig() {
     return output;
 }
 
-std::optional<std::string> radmin_from_ipconfig() {
-    const std::string text = run_ipconfig();
-    std::istringstream stream(text);
-    std::string line;
-    bool in_block = false;
-    std::vector<std::string> block;
-    while (std::getline(stream, line)) {
-        if (line.find("Radmin VPN") != std::string::npos) {
-            in_block = true;
-            block.clear();
-            continue;
-        }
-        if (in_block) {
-            if (line.empty() || (line.size() == 1 && line[0] == '\r')) {
-                if (!block.empty()) {
-                    break;
-                }
-            } else {
-                block.push_back(line);
-            }
+bool should_skip_adapter(const std::string& name) {
+    std::string lower = name;
+    for (char& c : lower) {
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    }
+    if (lower.find("radmin") != std::string::npos) {
+        return false;
+    }
+    const char* skips[] = {"loopback", "vethernet", "vmware", "hyper-v", "virtualbox", "virtual"};
+    for (const char* token : skips) {
+        if (lower.find(token) != std::string::npos) {
+            return true;
         }
     }
-    static const std::regex re(R"(IPv4[^:]*:\s*([\d.]+))", std::regex::icase);
-    for (const auto& entry : block) {
-        std::smatch match;
-        if (std::regex_search(entry, match, re)) {
-            return match[1].str();
-        }
-    }
-    return std::nullopt;
+    return false;
 }
 
 std::optional<std::string> lan_from_udp() {
@@ -181,51 +165,6 @@ std::optional<std::string> lan_from_udp() {
     return result;
 }
 
-std::optional<std::string> lan_from_ipconfig() {
-    const std::string text = run_ipconfig();
-    std::istringstream stream(text);
-    std::string line;
-    std::string current_adapter;
-    static const std::regex re(R"(IPv4[^:]*:\s*([\d.]+))", std::regex::icase);
-
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line[0] != ' ' && line[0] != '\t') {
-            current_adapter = line;
-            while (!current_adapter.empty() && (current_adapter.back() == '\r' || current_adapter.back() == ':')) {
-                current_adapter.pop_back();
-            }
-            continue;
-        }
-        std::string adapter_lower = current_adapter;
-        for (char& c : adapter_lower) {
-            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-        }
-        const char* skips[] = {"radmin", "loopback", "virtual", "vethernet", "vmware", "hyper-v"};
-        bool skip = false;
-        for (const char* token : skips) {
-            if (adapter_lower.find(token) != std::string::npos) {
-                skip = true;
-                break;
-            }
-        }
-        if (skip) {
-            continue;
-        }
-        std::smatch match;
-        if (!std::regex_search(line, match, re)) {
-            continue;
-        }
-        const std::string candidate = match[1].str();
-        if (candidate.rfind("169.254.", 0) == 0) {
-            continue;
-        }
-        if (is_private_ip(candidate) && !is_radmin_ip(candidate)) {
-            return candidate;
-        }
-    }
-    return std::nullopt;
-}
-
 unsigned ip_to_u32(const std::string& ip) {
     unsigned a = 0, b = 0, c = 0, d = 0;
     std::sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d);
@@ -241,30 +180,170 @@ std::string u32_to_ip(unsigned value) {
 
 }  // namespace
 
+std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text) {
+    std::istringstream stream(text);
+    std::string line;
+    std::string current_adapter;
+    std::vector<LocalInterface> results;
+    std::set<std::string> seen_ips;
+    static const std::regex re(R"(IPv4[^:]*:\s*([\d.]+))", std::regex::icase);
+
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line[0] != ' ' && line[0] != '\t') {
+            current_adapter = line;
+            while (!current_adapter.empty() &&
+                   (current_adapter.back() == '\r' || current_adapter.back() == ':')) {
+                current_adapter.pop_back();
+            }
+            continue;
+        }
+        if (current_adapter.empty() || should_skip_adapter(current_adapter)) {
+            continue;
+        }
+        std::smatch match;
+        if (!std::regex_search(line, match, re)) {
+            continue;
+        }
+        const std::string candidate = match[1].str();
+        if (candidate.rfind("169.254.", 0) == 0 || seen_ips.count(candidate)) {
+            continue;
+        }
+
+        std::string adapter_lower = current_adapter;
+        for (char& c : adapter_lower) {
+            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        }
+
+        LocalInterface iface;
+        iface.name = current_adapter;
+        iface.ip = candidate;
+        if (is_radmin_ip(candidate) || adapter_lower.find("radmin") != std::string::npos) {
+            iface.network_type = "radmin";
+        } else if (is_private_ip(candidate)) {
+            iface.network_type = "lan";
+        } else {
+            continue;
+        }
+        seen_ips.insert(candidate);
+        results.push_back(std::move(iface));
+    }
+    return results;
+}
+
+std::vector<LocalInterface> list_local_interfaces() {
+    std::vector<LocalInterface> interfaces = parse_ipconfig_interfaces(run_ipconfig());
+    if (const auto dword = read_radmin_reg_ipv4()) {
+        const std::string radmin_ip = dword_to_ip(*dword);
+        bool found = false;
+        for (const auto& iface : interfaces) {
+            if (iface.ip == radmin_ip) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            interfaces.insert(interfaces.begin(), LocalInterface{"Radmin VPN", radmin_ip, "radmin"});
+        }
+    }
+    return interfaces;
+}
+
 std::optional<std::string> get_radmin_ip() {
     if (const auto dword = read_radmin_reg_ipv4()) {
         return dword_to_ip(*dword);
     }
-    return radmin_from_ipconfig();
+    for (const auto& iface : list_local_interfaces()) {
+        if (iface.network_type == "radmin") {
+            return iface.ip;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string> get_lan_ips() {
+    std::vector<std::string> ips;
+    std::set<std::string> seen;
+    for (const auto& iface : list_local_interfaces()) {
+        if (iface.network_type != "lan" || seen.count(iface.ip)) {
+            continue;
+        }
+        seen.insert(iface.ip);
+        ips.push_back(iface.ip);
+    }
+
+    if (auto preferred = lan_from_udp()) {
+        auto it = std::find(ips.begin(), ips.end(), *preferred);
+        if (it != ips.end()) {
+            ips.erase(it);
+            ips.insert(ips.begin(), *preferred);
+        } else if (!seen.count(*preferred)) {
+            ips.insert(ips.begin(), *preferred);
+        }
+    }
+    return ips;
 }
 
 std::optional<std::string> get_lan_ip() {
-    if (auto ip = lan_from_udp()) {
-        return ip;
+    const auto ips = get_lan_ips();
+    if (ips.empty()) {
+        return std::nullopt;
     }
-    return lan_from_ipconfig();
+    return ips.front();
+}
+
+std::vector<std::string> get_local_ips(const std::string& network_type) {
+    if (network_type == "lan") {
+        return get_lan_ips();
+    }
+    if (auto radmin = get_radmin_ip()) {
+        return {*radmin};
+    }
+    return {};
 }
 
 std::optional<std::string> get_local_ip(const std::string& network_type) {
-    if (network_type == "lan") {
-        return get_lan_ip();
+    const auto ips = get_local_ips(network_type);
+    if (ips.empty()) {
+        return std::nullopt;
     }
-    return get_radmin_ip();
+    return ips.front();
 }
+
+std::string format_local_interfaces(const std::vector<LocalInterface>& interfaces) {
+    if (interfaces.empty()) {
+        return "Nenhuma rede detectada";
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < interfaces.size(); ++i) {
+        if (i > 0) {
+            oss << " · ";
+        }
+        const auto& iface = interfaces[i];
+        const std::string label = iface.network_type == "radmin" ? "Radmin" : iface.name;
+        oss << label << ": " << iface.ip;
+    }
+    return oss.str();
+}
+
+std::string format_local_interfaces() { return format_local_interfaces(list_local_interfaces()); }
 
 std::string subnet_prefix_24(const std::string& ip) {
     const unsigned base = ip_to_u32(ip) & 0xFFFFFF00u;
     return u32_to_ip(base) + "/24";
+}
+
+std::vector<std::string> unique_scan_ips(const std::vector<std::string>& local_ips) {
+    std::vector<std::string> result;
+    std::set<std::string> seen_subnets;
+    for (const auto& ip : local_ips) {
+        const std::string key = subnet_prefix_24(ip);
+        if (seen_subnets.count(key)) {
+            continue;
+        }
+        seen_subnets.insert(key);
+        result.push_back(ip);
+    }
+    return result;
 }
 
 std::set<std::string> skip_ips_for_network(const std::string& network_type, const std::string& local_ip) {

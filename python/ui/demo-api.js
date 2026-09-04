@@ -247,7 +247,8 @@
     return {
       radmin_ip: "26.0.0.1",
       lan_ip: "192.168.0.5",
-      local_ips: "Radmin: 26.0.0.1 · LAN: 192.168.0.5",
+      lan_ips: ["192.168.0.5", "10.0.0.8"],
+      local_ips: "Radmin: 26.0.0.1 · Ethernet: 192.168.0.5 · Wi-Fi: 10.0.0.8",
       notifications_enabled: state.notifications_enabled,
       history_retention_days: state.history_retention_days,
       show_hidden: state.show_hidden,

@@ -103,8 +103,8 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
         if (auto radmin = get_radmin_ip()) {
             known_global.insert(*radmin);
         }
-        if (auto lan = get_lan_ip()) {
-            known_global.insert(*lan);
+        for (const auto& lan_ip : get_lan_ips()) {
+            known_global.insert(lan_ip);
         }
 
         bool config_changed = false;
@@ -112,8 +112,8 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
             if (!network.enabled) {
                 continue;
             }
-            auto local_ip = get_local_ip(network.network_type);
-            if (!local_ip) {
+            const auto local_ips = get_local_ips(network.network_type);
+            if (local_ips.empty()) {
                 emit_log(sink, "Rede '" + network.name + "' (" + network.network_type + ") não detectada.");
                 continue;
             }
@@ -123,22 +123,33 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
             const bool empty = network.peers.empty() && network.auto_discover;
 
             if (due || empty) {
-                auto discovered =
-                    discover_peers(
-                        *local_ip,
-                        known_global,
-                        skip_ips_for_network(network.network_type, *local_ip),
-                        &stop);
-                for (auto& peer : discovered) {
-                    peer.network_name = network.name;
-                    peer.network_type = network.network_type;
-                    emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
-                    if (sink != nullptr) {
-                        sink->on_peer_discovered(PeerDiscoveredEvent{peer});
-                    }
+                const auto scan_ips = unique_scan_ips(local_ips);
+                for (const auto& local_ip : local_ips) {
+                    known_global.insert(local_ip);
                 }
-                if (!discovered.empty()) {
-                    persist_discovered_peers(network.name, discovered);
+                std::vector<Peer> discovered_all;
+                for (const auto& local_ip : scan_ips) {
+                    if (stop.load()) {
+                        break;
+                    }
+                    auto discovered = discover_peers(
+                        local_ip,
+                        known_global,
+                        skip_ips_for_network(network.network_type, local_ip),
+                        &stop);
+                    for (auto& peer : discovered) {
+                        peer.network_name = network.name;
+                        peer.network_type = network.network_type;
+                        emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
+                        if (sink != nullptr) {
+                            sink->on_peer_discovered(PeerDiscoveredEvent{peer});
+                        }
+                        known_global.insert(peer.ip);
+                    }
+                    discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+                }
+                if (!discovered_all.empty()) {
+                    persist_discovered_peers(network.name, discovered_all);
                     config_changed = true;
                 }
                 last_scans[network.name] = now;
@@ -164,6 +175,8 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
 
         const auto radmin = get_radmin_ip();
         const auto lan = get_lan_ip();
+        const auto lan_ips = get_lan_ips();
+        const std::string local_label = format_local_interfaces();
         if (visible.empty()) {
             emit_log(sink, "Nenhum peer configurado ou encontrado. Aguardando...");
         } else {
@@ -182,8 +195,7 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
             }
             emit_log(sink, "Verificação concluída: " + std::to_string(online_count) + "/" +
                                std::to_string(visible.size()) + " online (" +
-                               std::to_string(config.hidden_peers().size()) + " ocultos) · Radmin: " +
-                               (radmin ? *radmin : "—") + " · LAN: " + (lan ? *lan : "—"));
+                               std::to_string(config.hidden_peers().size()) + " ocultos) · " + local_label);
         }
 
         if (sink != nullptr) {
@@ -192,6 +204,8 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
             snapshot.state = state;
             snapshot.radmin_ip = radmin.value_or("");
             snapshot.lan_ip = lan.value_or("");
+            snapshot.lan_ips = lan_ips;
+            snapshot.local_ips = local_label;
             snapshot.visible_count = static_cast<int>(config.visible_peers().size());
             snapshot.hidden_count = static_cast<int>(config.hidden_peers().size());
             snapshot.online_count = 0;
@@ -214,15 +228,29 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
 }
 
 bool scan_network(const std::string& network_type) {
-    auto local_ip = get_local_ip(network_type);
+    const auto local_ips = get_local_ips(network_type);
     const std::string label = network_type == "radmin" ? "Radmin VPN" : "LAN";
-    if (!local_ip) {
+    if (local_ips.empty()) {
         std::cout << label << " não encontrada. Verifique a conexão.\n";
         return false;
     }
 
-    std::cout << "IP local (" << label << "): " << *local_ip << "\n";
-    std::cout << "Escaneando sub-rede " << subnet_prefix_24(*local_ip) << "...\n";
+    const auto scan_ips = unique_scan_ips(local_ips);
+    std::cout << "IP(s) local(is) (" << label << "): ";
+    for (size_t i = 0; i < local_ips.size(); ++i) {
+        if (i > 0) {
+            std::cout << ", ";
+        }
+        std::cout << local_ips[i];
+    }
+    std::cout << "\nEscaneando sub-rede(s) ";
+    for (size_t i = 0; i < scan_ips.size(); ++i) {
+        if (i > 0) {
+            std::cout << ", ";
+        }
+        std::cout << subnet_prefix_24(scan_ips[i]);
+    }
+    std::cout << "...\n";
 
     MonitorConfig config = load_config();
     const NetworkConfig* network = nullptr;
@@ -241,34 +269,61 @@ bool scan_network(const std::string& network_type) {
     for (const auto& peer : config.all_peers()) {
         known.insert(peer.ip);
     }
-    known.insert(*local_ip);
-
-    auto discovered = discover_peers(*local_ip, known, skip_ips_for_network(network_type, *local_ip));
-    for (auto& peer : discovered) {
-        peer.network_name = network->name;
-        peer.network_type = network_type;
+    for (const auto& local_ip : local_ips) {
+        known.insert(local_ip);
     }
 
-    if (!discovered.empty()) {
-        persist_discovered_peers(network->name, discovered);
-        std::cout << "\n" << discovered.size() << " peer(s) encontrado(s) em '" << network->name << "':\n";
-        for (const auto& peer : discovered) {
+    std::vector<Peer> discovered_all;
+    for (const auto& local_ip : scan_ips) {
+        auto discovered = discover_peers(local_ip, known, skip_ips_for_network(network_type, local_ip));
+        for (auto& peer : discovered) {
+            peer.network_name = network->name;
+            peer.network_type = network_type;
+            known.insert(peer.ip);
+        }
+        discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+    }
+
+    if (!discovered_all.empty()) {
+        persist_discovered_peers(network->name, discovered_all);
+        std::cout << "\n" << discovered_all.size() << " peer(s) encontrado(s) em '" << network->name << "':\n";
+        for (const auto& peer : discovered_all) {
             std::cout << "  - " << peer.name << " (" << peer.ip << ")\n";
         }
     } else {
-        std::cout << "\nNenhum peer online encontrado na sub-rede " << label << ".\n";
+        std::cout << "\nNenhum peer online encontrado na(s) sub-rede(s) " << label << ".\n";
     }
     return true;
 }
 
 void show_status() {
+    const auto interfaces = list_local_interfaces();
     const auto radmin = get_radmin_ip();
-    const auto lan = get_lan_ip();
+    const auto lan_ips = get_lan_ips();
     const MonitorConfig config = load_config();
     const StateMap state = load_state();
 
+    if (!interfaces.empty()) {
+        std::cout << "Interfaces:\n";
+        for (const auto& iface : interfaces) {
+            std::cout << "  [" << iface.network_type << "] " << iface.name << ": " << iface.ip << "\n";
+        }
+    } else {
+        std::cout << "Interfaces: nenhuma detectada\n";
+    }
     std::cout << "IP Radmin: " << (radmin ? *radmin : "não detectado") << "\n";
-    std::cout << "IP LAN:    " << (lan ? *lan : "não detectado") << "\n";
+    std::cout << "IP(s) LAN: ";
+    if (lan_ips.empty()) {
+        std::cout << "não detectado";
+    } else {
+        for (size_t i = 0; i < lan_ips.size(); ++i) {
+            if (i > 0) {
+                std::cout << ", ";
+            }
+            std::cout << lan_ips[i];
+        }
+    }
+    std::cout << "\n";
     std::cout << "Peers visíveis: " << config.visible_peers().size() << "\n";
     std::cout << "Peers ocultos:  " << config.hidden_peers().size() << "\n";
     std::cout << "Intervalo de verificação: " << config.interval_seconds << "s\n";

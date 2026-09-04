@@ -596,14 +596,18 @@ void StatusWindow::refresh_view() {
 
 void StatusWindow::refresh_labels() {
     std::wstring local_ip_text;
-    if (!snapshot_.radmin_ip.empty()) {
-        local_ip_text += L"Radmin: " + widen(snapshot_.radmin_ip);
-    }
-    if (!snapshot_.lan_ip.empty()) {
-        if (!local_ip_text.empty()) {
-            local_ip_text += L" · ";
+    if (!snapshot_.local_ips.empty()) {
+        local_ip_text = widen(snapshot_.local_ips);
+    } else if (!snapshot_.radmin_ip.empty() || !snapshot_.lan_ip.empty()) {
+        if (!snapshot_.radmin_ip.empty()) {
+            local_ip_text += L"Radmin: " + widen(snapshot_.radmin_ip);
         }
-        local_ip_text += L"LAN: " + widen(snapshot_.lan_ip);
+        if (!snapshot_.lan_ip.empty()) {
+            if (!local_ip_text.empty()) {
+                local_ip_text += L" · ";
+            }
+            local_ip_text += L"LAN: " + widen(snapshot_.lan_ip);
+        }
     }
     if (local_ip_text.empty()) {
         local_ip_text = L"Nenhuma rede detectada";
@@ -697,6 +701,8 @@ void StatusWindow::refresh_now(bool force_network) {
     if (force_network || !has_snapshot_) {
         snapshot_.radmin_ip = get_radmin_ip().value_or("");
         snapshot_.lan_ip = get_lan_ip().value_or("");
+        snapshot_.lan_ips = get_lan_ips();
+        snapshot_.local_ips = format_local_interfaces();
         has_snapshot_ = true;
     }
     snapshot_.visible_count = static_cast<int>(config.visible_peers().size());

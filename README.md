@@ -1,6 +1,6 @@
 # Network Monitor
 
-Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos na sub-rede `/24`, notifica quando alguém fica online ou offline e registra histórico de presença.
+Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos em todas as sub-redes `/24` das interfaces privadas detectadas (mais Radmin), notifica quando alguém fica online ou offline e registra histórico de presença.
 
 ## Demo do painel
 
@@ -53,8 +53,8 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | `.\python\run.bat --run` | Monitor só no console |
 | `.\python\run.bat --status` | Status atual |
 | `.\python\run.bat --scan` | Escaneia sub-rede Radmin |
-| `.\python\run.bat --scan-lan` | Escaneia sub-rede LAN |
-| `.\python\run.bat --scan-all` | Escaneia Radmin e LAN |
+| `.\python\run.bat --scan-lan` | Escaneia todas as sub-redes LAN detectadas |
+| `.\python\run.bat --scan-all` | Escaneia Radmin e todas as interfaces LAN |
 | `.\python\run.bat --install` | Atalho na pasta Startup |
 | `.\python\run.bat --uninstall` | Remove o atalho Startup |
 | `.\cpp\run.bat` | Bandeja + monitor (C++ Win32, compila se preciso) |

@@ -102,21 +102,18 @@ def resolve_ui_dir() -> Path:
 def build_snapshot(*, show_hidden: bool) -> dict:
     from nm.config import load_config
     from nm.identity import get_peer_runtime
-    from nm.network import get_lan_ip, get_radmin_ip
+    from nm.network import format_local_interfaces, get_lan_ip, get_lan_ips, get_radmin_ip
     from nm.state import load_state
 
     radmin_ip = get_radmin_ip()
     lan_ip = get_lan_ip()
+    lan_ips = get_lan_ips()
     config = load_config()
     state = load_state()
     display_peers = config.all_peers if show_hidden else config.peers
 
-    parts: list[str] = []
-    if radmin_ip:
-        parts.append(f"Radmin: {radmin_ip}")
-    if lan_ip:
-        parts.append(f"LAN: {lan_ip}")
-    local_ips = " · ".join(parts) if parts else "Nenhuma rede detectada"
+    local_ips = format_local_interfaces()
+
 
     peers: list[dict] = []
     online_count = 0
@@ -154,6 +151,7 @@ def build_snapshot(*, show_hidden: bool) -> dict:
     return {
         "radmin_ip": radmin_ip,
         "lan_ip": lan_ip,
+        "lan_ips": lan_ips,
         "local_ips": local_ips,
         "notifications_enabled": config.notifications_enabled,
         "history_retention_days": config.history_retention_days,
