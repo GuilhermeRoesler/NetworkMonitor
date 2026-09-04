@@ -11,6 +11,7 @@ from datetime import datetime
 
 from nm.oui import OUI_VENDORS
 from nm.ping import resolve_hostname
+from nm.win32_process import hidden_run
 
 _ARP_LINE_RE = re.compile(
     r"^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})\s+",
@@ -74,14 +75,13 @@ def load_arp_table(*, force: bool = False) -> dict[str, str]:
     if not force and _arp_cache and (now - _arp_cache_at) < _ARP_CACHE_TTL_SECONDS:
         return dict(_arp_cache)
     try:
-        result = subprocess.run(
+        result = hidden_run(
             ["arp", "-a"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         table = parse_arp_table(result.stdout)
         _arp_cache = table

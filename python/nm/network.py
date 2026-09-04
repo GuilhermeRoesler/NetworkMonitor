@@ -10,6 +10,8 @@ import subprocess
 import winreg
 from dataclasses import dataclass
 
+from nm.win32_process import hidden_run
+
 RADMIN_REG_PATHS = (
     r"SOFTWARE\WOW6432Node\Famatech\RadminVPN\1.0",
     r"SOFTWARE\Famatech\RadminVPN\1.0",
@@ -185,7 +187,7 @@ def _radmin_from_registry() -> str | None:
 
 
 def _run_ipconfig() -> str:
-    result = subprocess.run(
+    result = hidden_run(
         ["ipconfig"],
         capture_output=True,
         text=True,

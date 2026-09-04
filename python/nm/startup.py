@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys
 import winreg
 from pathlib import Path
 
 from nm import paths
+from nm.win32_process import hidden_run
 
 LEGACY_STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 LEGACY_STARTUP_VALUE = "RadminMonitor"
@@ -87,7 +87,7 @@ def create_startup_shortcut() -> None:
         f"$s.Description = {_ps_single_quote(paths.APP_NAME)}; "
         "$s.Save()"
     )
-    result = subprocess.run(
+    result = hidden_run(
         ["powershell", "-NoProfile", "-Command", ps],
         capture_output=True,
         text=True,

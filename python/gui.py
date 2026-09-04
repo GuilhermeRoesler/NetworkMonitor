@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import sys
 import threading
 from datetime import datetime
 from pathlib import Path
+
+from nm.win32_process import hidden_run
 
 APP_NAME = "Network Monitor"
 WINDOW_WIDTH = 750
@@ -253,11 +254,10 @@ class GuiApi:
         if not value:
             return False
         try:
-            subprocess.run(
+            hidden_run(
                 ["clip"],
                 input=value.encode("utf-16"),
                 check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             return True
         except Exception:
