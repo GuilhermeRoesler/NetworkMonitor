@@ -11,14 +11,14 @@ import pytest
 @pytest.fixture
 def tmp_app_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isola peers.json / state.json / history.json / monitor.log em um diretório temporário."""
-    import main
+    import nm.paths as paths
 
-    monkeypatch.setattr(main, "APP_DIR", tmp_path)
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main, "CONFIG_PATH", tmp_path / "peers.json")
-    monkeypatch.setattr(main, "STATE_PATH", tmp_path / "state.json")
-    monkeypatch.setattr(main, "HISTORY_PATH", tmp_path / "history.json")
-    monkeypatch.setattr(main, "LOG_PATH", tmp_path / "monitor.log")
+    monkeypatch.setattr(paths, "APP_DIR", tmp_path)
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(paths, "CONFIG_PATH", tmp_path / "peers.json")
+    monkeypatch.setattr(paths, "STATE_PATH", tmp_path / "state.json")
+    monkeypatch.setattr(paths, "HISTORY_PATH", tmp_path / "history.json")
+    monkeypatch.setattr(paths, "LOG_PATH", tmp_path / "monitor.log")
     return tmp_path
 
 

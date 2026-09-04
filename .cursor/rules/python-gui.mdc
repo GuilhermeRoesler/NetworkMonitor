@@ -12,4 +12,4 @@ Ao alterar `python/gui.py` ou `python/ui/` (painel, bridge, DnD, rename, menus):
 
 Leia e siga **`.cursor/skills/python-gui/SKILL.md`**.
 
-Ações de persistência vivem em `main.py` — não duplicar I/O de config na GUI.
+Ações de persistência vivem em `python/nm/` — não duplicar I/O de config na GUI.

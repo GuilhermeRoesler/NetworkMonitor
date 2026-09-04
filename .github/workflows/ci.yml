@@ -52,10 +52,10 @@ jobs:
         run: ruff format --check python
 
       - name: Compile Python sources
-        run: python -m compileall -q python/main.py python/gui.py python/build.py
+        run: python -m compileall -q python/main.py python/gui.py python/build.py python/nm
 
       - name: Pytest
-        run: pytest --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=35
+        run: pytest --cov=nm --cov-report=term-missing:skip-covered --cov-fail-under=35
 
   cpp:
     name: C++ (configure + build)
@@ -110,6 +110,7 @@ jobs:
           $required = @(
             "python/main.py",
             "python/gui.py",
+            "python/nm/__init__.py",
             "python/requirements.txt",
             "python/requirements-dev.txt",
             "cpp/CMakeLists.txt",

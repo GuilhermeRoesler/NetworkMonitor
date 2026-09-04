@@ -4,7 +4,8 @@ description: >-
   Schema compartilhado peers.json, state.json e history.json do Network Monitor
   (Python e C++). Use ao adicionar/alterar campos de peer, rede, peer_order,
   retenção de histórico, defaults de config, normalização de ordem, ou qualquer
-  mudança que afete load_config/save_state/history em python/main.py ou cpp config.
+  mudança que afete load_config/save_state/history em python/nm/config.py,
+  python/nm/state.py, python/nm/history.py ou cpp config.
 ---
 
 # Config schema (`peers.json` / `state.json` / `history.json`)
@@ -82,7 +83,7 @@ Mapa IP → segmentos de presença online:
 
 Qualquer campo novo/alterado:
 
-1. `python/main.py` — `load_config` / `save_default_config` / setters (+ `history.json` se afetar presença)
+1. `python/nm/config.py` (+ `state.py` / `history.py` se afetar) — `load_config` / `save_default_config` / setters
 2. `cpp/include/config.hpp` + `cpp/src/config.cpp`
 3. GUI se for visível (`python/gui.py`)
 4. Testes: `python/tests/test_config.py`, `test_peer_order.py`, `test_history.py`, `cpp/tests/test_config.cpp`

@@ -100,7 +100,10 @@ def resolve_ui_dir() -> Path:
 
 
 def build_snapshot(*, show_hidden: bool) -> dict:
-    from main import get_lan_ip, get_peer_runtime, get_radmin_ip, load_config, load_state
+    from nm.config import load_config
+    from nm.identity import get_peer_runtime
+    from nm.network import get_lan_ip, get_radmin_ip
+    from nm.state import load_state
 
     radmin_ip = get_radmin_ip()
     lan_ip = get_lan_ip()
@@ -177,18 +180,18 @@ class GuiApi:
         return self._owner.build_snapshot()
 
     def set_notifications(self, enabled: bool) -> bool:
-        from main import set_notifications_enabled
+        from nm.config import set_notifications_enabled
 
         set_notifications_enabled(bool(enabled))
         return True
 
     def set_history_retention(self, days: int) -> int:
-        from main import set_history_retention_days
+        from nm.config import set_history_retention_days
 
         return int(set_history_retention_days(int(days)))
 
     def get_peer_history(self, ip: str) -> list:
-        from main import get_peer_history
+        from nm.history import get_peer_history
 
         return get_peer_history(str(ip))
 
@@ -197,29 +200,29 @@ class GuiApi:
         return True
 
     def rename_peer(self, ip: str, name: str) -> bool:
-        from main import update_peer_name
+        from nm.config import update_peer_name
 
         return bool(update_peer_name(ip, name.strip()))
 
     def set_hidden(self, ip: str, hidden: bool) -> bool:
-        from main import set_peer_hidden
+        from nm.config import set_peer_hidden
 
         return bool(set_peer_hidden(ip, bool(hidden)))
 
     def set_muted(self, ip: str, muted: bool) -> bool:
-        from main import set_peer_muted
+        from nm.config import set_peer_muted
 
         return bool(set_peer_muted(ip, bool(muted)))
 
     def move_peer(self, ip: str, before_ip: str | None) -> bool:
-        from main import move_peer, move_peer_to_end
+        from nm.config import move_peer, move_peer_to_end
 
         if before_ip:
             return bool(move_peer(ip, before_ip))
         return bool(move_peer_to_end(ip))
 
     def move_peer_to_top(self, ip: str) -> bool:
-        from main import load_config, move_peer
+        from nm.config import load_config, move_peer
 
         config = load_config()
         display = config.all_peers if self._owner.show_hidden else config.peers
@@ -341,11 +344,8 @@ class StatusWindow:
             )
             return
 
-        from main import (
-            ICON_ICO_NAME,
-            ensure_win32_app_user_model_id,
-            resolve_asset_path,
-        )
+        from nm.paths import ICON_ICO_NAME, resolve_asset_path
+        from nm.win32_ui import ensure_win32_app_user_model_id
 
         # Obrigatório antes de create_window/start — senão a taskbar fica com o Python.
         ensure_win32_app_user_model_id()
@@ -394,7 +394,7 @@ class StatusWindow:
         except Exception:
             logging.exception("Falha ao iniciar o WebView2")
         finally:
-            from main import destroy_win32_icons
+            from nm.win32_ui import destroy_win32_icons
 
             destroy_win32_icons(self._win_icon_handles)
             self._win_icon_handles = None
@@ -456,7 +456,8 @@ class StatusWindow:
         if sys.platform != "win32":
             return
         try:
-            from main import ICON_ICO_NAME, resolve_asset_path, set_win32_window_icons
+            from nm.paths import ICON_ICO_NAME, resolve_asset_path
+            from nm.win32_ui import set_win32_window_icons
 
             ico = resolve_asset_path(ICON_ICO_NAME)
             if ico is None:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from main import get_peer_runtime, parse_ping_rtt_ms, record_peer_ping
+from nm.identity import get_peer_runtime, record_peer_ping
+from nm.ping import parse_ping_rtt_ms
 
 
 def test_parse_ping_rtt_portuguese() -> None:

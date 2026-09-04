@@ -68,7 +68,7 @@ Sem `--install`. Help em português.
 - Transições de estado equivalentes; toast nativo quando UI ativa
 - Painel: rename, ocultar/mostrar, mute, reorder (paridade com `python/gui.py`)
 
-Ao mudar schema ou regra de rede: atualizar **também** `python/main.py`.
+Ao mudar schema ou regra de rede: atualizar **também** `python/nm/config.py` / `python/nm/network.py`.
 Ao mudar comportamento do painel: manter paridade com `python/gui.py`.
 
 ## Testes

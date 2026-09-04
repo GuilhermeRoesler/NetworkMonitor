@@ -61,7 +61,8 @@ def test_copy_text_uses_clipboard() -> None:
 
 
 def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
-    import main
+    import nm.network as network
+    import nm.paths as paths
 
     config_path = tmp_path / "peers.json"
     state_path = tmp_path / "state.json"
@@ -83,10 +84,10 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
     state_path.write_text('{"26.0.0.2": true}', encoding="utf-8")
-    monkeypatch.setattr(main, "CONFIG_PATH", config_path)
-    monkeypatch.setattr(main, "STATE_PATH", state_path)
-    monkeypatch.setattr(main, "get_radmin_ip", lambda: "26.0.0.10")
-    monkeypatch.setattr(main, "get_lan_ip", lambda: "192.168.0.5")
+    monkeypatch.setattr(paths, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(paths, "STATE_PATH", state_path)
+    monkeypatch.setattr(network, "get_radmin_ip", lambda: "26.0.0.10")
+    monkeypatch.setattr(network, "get_lan_ip", lambda: "192.168.0.5")
 
     snap = build_snapshot(show_hidden=False)
     assert snap["radmin_ip"] == "26.0.0.10"

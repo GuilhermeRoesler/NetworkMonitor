@@ -1,6 +1,6 @@
 ---
 description: Schema peers.json/state.json — leia a skill config-schema
-globs: cpp/include/config.hpp,cpp/src/config.cpp,cpp/tests/test_config.cpp,python/tests/test_config.py,python/tests/test_peer_order.py
+globs: cpp/include/config.hpp,cpp/src/config.cpp,cpp/tests/test_config.cpp,python/nm/config.py,python/nm/state.py,python/nm/history.py,python/nm/models.py,python/tests/test_config.py,python/tests/test_peer_order.py,python/tests/test_history.py
 alwaysApply: false
 ---
 

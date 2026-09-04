@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from main import (
+from nm.identity import (
     get_peer_runtime,
     normalize_mac,
     os_hint_from_ttl,
     parse_arp_table,
-    parse_ping_ttl,
     record_peer_ping,
     vendor_from_mac,
 )
+from nm.ping import parse_ping_ttl
 
 
 def test_parse_ping_ttl() -> None:

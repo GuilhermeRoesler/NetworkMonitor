@@ -16,7 +16,7 @@ description: >-
 - Modo bandeja: tray em daemon `radmin-tray`; painel inicia oculto até `show()`
 - Frontend: `python/ui/index.html` + `app.css` + `app.js` (vanilla)
 - Snapshot a cada ~3s via JS (`get_snapshot`) ou `refresh_now`
-- Lê/grava estado via imports **lazy** de `main` (dentro de `GuiApi` / `build_snapshot`)
+- Lê/grava estado via imports de `nm.*` (`config`, `state`, `history`, `network`, `identity`, `paths`, `win32_ui`)
 
 ## UI
 
@@ -34,7 +34,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 ## Thread-safety
 
-- Persistência só via `GuiApi` → funções de `main.py`
+- Persistência só via `GuiApi` → funções de `nm.config` / `nm.history` / etc.
 - JS marca `busy` durante rename/drag e ignora snapshots nesse intervalo
 - Histórico via `get_peer_history(ip)` (não no snapshot de 3s); expansão preservada no re-render
 - `run_main_loop` / `webview.start` apenas na thread principal
@@ -42,7 +42,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 ## Nova ação no painel
 
-1. Função de persistência em `python/main.py`
+1. Função de persistência em `python/nm/` (ex.: `nm/config.py`)
 2. Método em `GuiApi` + handler em `python/ui/app.js`
 3. Incluir no snapshot se for estado exibido
 4. Manter textos em português
@@ -61,7 +61,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 ## Não fazer
 
-- Importar `gui` no top-level de `main.py`
-- Duplicar I/O de config no JS ou em `gui.py` fora das APIs de `main`
+- Importar `gui` no top-level de `nm.cli` / `main.py` (só lazy em tray/cli)
+- Duplicar I/O de config no JS ou em `gui.py` fora das APIs de `nm`
 - Assumir que a janela está aberta — checar `is_open` / `_window`
 - Migrar a UI C++ neste fluxo (permanece Win32)

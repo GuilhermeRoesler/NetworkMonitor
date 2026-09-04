@@ -14,7 +14,7 @@ App **Windows** que monitora peers **Radmin VPN** (`26.*`) e **LAN** (RFC1918) v
 
 | Camada | Path | Papel |
 |--------|------|--------|
-| Primária | `python/` | Monitor, tray (`pystray`), toast (`winotify`), GUI (WebView2/`pywebview`), startup |
+| Primária | `python/` | Monitor (`nm/`), tray, toast, GUI, startup; entrypoint `main.py` |
 | Secundária | `cpp/` | Core CLI + UI Win32 (bandeja, toast, painel); sem startup |
 | Config | raiz | `peers.json`, `state.json`, `history.json`, `monitor.log` — compartilhados |
 | CI/CD | `.github/workflows/` | `ci.yml` (PR), `cd.yml` (tags `v*`) |
@@ -27,7 +27,8 @@ Não portar para Linux/macOS sem pedido explícito.
 
 ```
 run.bat / run.sh          → python/
-python/main.py            lógica + CLI + bandeja
+python/main.py            entrypoint CLI
+python/nm/                core (config, ping, monitor, tray, …)
 python/gui.py             StatusWindow (pywebview)
 python/ui/                HTML/CSS/JS do painel
 python/build.py           PyInstaller onedir
@@ -59,7 +60,7 @@ Shutdown: `stop_event` → `status_window.close()` → `icon.stop()` → join mo
 | Área | Skill | Quando |
 |------|-------|--------|
 | Schema JSON | `config-schema` | campos em `peers.json` / `state.json` |
-| Monitor Python | `python-monitor` | ping, descoberta, tray, toast, startup, CLI |
+| Monitor Python | `python-monitor` | pacote `nm/`, ping, descoberta, tray, toast, startup, CLI |
 | GUI | `python-gui` | painel WebView2 |
 | C++ | `cpp-core` | core / CMake / ICMP / UI Win32 |
 | Pipelines | `ci-cd` | workflows, lint, release |
