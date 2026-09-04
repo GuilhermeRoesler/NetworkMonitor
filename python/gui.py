@@ -29,7 +29,7 @@ def center_in_area(
     area_w: int,
     area_h: int,
 ) -> tuple[int, int]:
-    """Origem (x, y) para centralizar width×height dentro da área útil."""
+    """Origem (x, y) para centralizar width x height dentro da área útil."""
     x = left + max(0, (area_w - width) // 2)
     y = top + max(0, (area_h - height) // 2)
     return x, y

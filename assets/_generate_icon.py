@@ -1,9 +1,11 @@
-"""Gera assets/icon.png e assets/icon.ico do Network Monitor."""
+"""Gera assets/icon.png e assets/icon.ico do Network Monitor.
+
+Design: fundo escuro + radar teal (paridade com python/ui/favicon.svg).
+"""
 
 from __future__ import annotations
 
 import io
-import math
 import struct
 from pathlib import Path
 
@@ -11,99 +13,92 @@ from PIL import Image, ImageDraw
 
 ASSETS = Path(__file__).resolve().parent
 
-TEAL = (11, 110, 143)
-BLUE = (0, 120, 212)
-WHITE = (255, 255, 255)
-GREEN = (26, 127, 55)
-RING = (255, 255, 255)
+# Alinhado ao painel (app.css) e favicon.svg
+BG = (11, 18, 24)  # #0b1218
+ACCENT = (42, 159, 150)  # #2a9f96
+ACCENT_BRIGHT = (60, 181, 171)  # #3cb5ab
 
 
-def lerp(a: float, b: float, t: float) -> float:
-    return a + (b - a) * t
+def _rgba(rgb: tuple[int, int, int], alpha: float) -> tuple[int, int, int, int]:
+    a = max(0, min(255, int(round(alpha * 255))))
+    return (*rgb, a)
 
 
-def blend(
-    c1: tuple[int, int, int], c2: tuple[int, int, int], t: float
-) -> tuple[int, int, int]:
-    return (
-        int(lerp(c1[0], c2[0], t)),
-        int(lerp(c1[1], c2[1], t)),
-        int(lerp(c1[2], c2[2], t)),
-    )
+def draw_rounded_rect(
+    draw: ImageDraw.ImageDraw,
+    size: int,
+    radius: float,
+    fill: tuple[int, int, int, int],
+) -> None:
+    r = max(1.0, radius)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=r, fill=fill)
 
 
 def draw_icon(size: int) -> Image.Image:
-    """Ícone: radar + hub + peers; um peer online (verde)."""
+    """Ícone escuro: anéis de radar + setor + hub teal."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    px = img.load()
-    assert px is not None
-
-    radius = max(2, int(size * 0.22))
-    last = max(1, size - 1)
-    for y in range(size):
-        for x in range(size):
-            cx_edge = min(x, size - 1 - x)
-            cy_edge = min(y, size - 1 - y)
-            if cx_edge < radius and cy_edge < radius:
-                dx = radius - cx_edge
-                dy = radius - cy_edge
-                if dx * dx + dy * dy > radius * radius:
-                    continue
-            t = (x + y) / (2 * last)
-            r, g, b = blend(TEAL, BLUE, t)
-            px[x, y] = (r, g, b, 255)
-
     draw = ImageDraw.Draw(img)
+
+    # Cantos arredondados proporcionais ao SVG (rx=7 em 32 → ~0.22)
+    corner = size * (7 / 32)
+    draw_rounded_rect(draw, size, corner, (*BG, 255))
+
     cx = cy = size / 2
-    s = size / 64.0
+    # Escala do SVG: viewBox 32, raios 12.2 / 8.2 / 4.2
+    s = size / 32.0
 
-    def oval(
-        x: float,
-        y: float,
-        r: float,
-        *,
-        fill: tuple[int, ...] | None = None,
-    ) -> None:
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+    rings = (
+        (12.2, 0.28, 1.2),
+        (8.2, 0.42, 1.2),
+        (4.2, 0.58, 1.2),
+    )
 
-    # Em 16px, menos detalhe para manter legível na bandeja
+    # Em 16px, só o anel externo + hub (legível na bandeja)
+    if size <= 16:
+        rings = ((11.0, 0.55, 1.4),)
+
+    for rad, opacity, width in rings:
+        ring_r = rad * s
+        w = max(1, int(round(width * s)))
+        # Pillow outline cresce para dentro/fora; desenhar em camada
+        layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(layer)
+        ld.ellipse(
+            (cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r),
+            outline=_rgba(ACCENT, opacity),
+            width=w,
+        )
+        img = Image.alpha_composite(img, layer)
+        draw = ImageDraw.Draw(img)
+
+    outer_r = 12.2 * s
+    # Setor SVG: de 12h horário até (10.55, 6.1). Pillow: 0°=3h, positivo=horário.
     if size >= 24:
-        for rad, alpha, w in ((22, 110, 2), (15, 140, 2)):
-            ring_r = rad * s
-            ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            rd = ImageDraw.Draw(ring)
-            rd.ellipse(
-                (cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r),
-                outline=(*RING, alpha),
-                width=max(1, int(round(w * s))),
-            )
-            img = Image.alpha_composite(img, ring)
-            draw = ImageDraw.Draw(img)
+        wedge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        wd = ImageDraw.Draw(wedge)
+        bbox = (cx - outer_r, cy - outer_r, cx + outer_r, cy + outer_r)
+        wd.pieslice(bbox, start=270, end=30, fill=_rgba(ACCENT, 0.22))
+        img = Image.alpha_composite(img, wedge)
+        draw = ImageDraw.Draw(img)
 
-    peer_angles = (math.radians(-30), math.radians(130), math.radians(250))
-    peer_r = (20 if size <= 16 else 22) * s
-    peers = [
-        (cx + peer_r * math.cos(a), cy + peer_r * math.sin(a)) for a in peer_angles
-    ]
+        tip_x = cx + 10.55 * s
+        tip_y = cy + 6.1 * s
+        line_w = max(1, int(round(1.35 * s)))
+        draw.line((cx, cy, tip_x, tip_y), fill=_rgba(ACCENT, 0.95), width=line_w)
+    else:
+        tip_x = cx + 9.5 * s
+        tip_y = cy + 5.5 * s
+        draw.line(
+            (cx, cy, tip_x, tip_y),
+            fill=_rgba(ACCENT, 0.9),
+            width=max(1, int(round(1.2 * s))),
+        )
 
-    line_w = max(1, int(round((1.5 if size <= 16 else 2.2) * s)))
-    for x, y in peers:
-        draw.line((cx, cy, x, y), fill=(*WHITE, 230), width=line_w)
-
-    hub_r = max(2.0, 5.2 * s)
-    oval(cx, cy, hub_r, fill=WHITE)
-
-    online_idx = 0
-    for i, (x, y) in enumerate(peers):
-        pr = max(1.5, 3.6 * s)
-        if i == online_idx:
-            if size >= 24:
-                oval(x, y, pr + max(1.0, 1.2 * s), fill=WHITE)
-                oval(x, y, max(1.5, pr * 0.72), fill=GREEN)
-            else:
-                oval(x, y, pr, fill=GREEN)
-        else:
-            oval(x, y, pr, fill=WHITE)
+    hub_r = max(1.2, 1.7 * s)
+    draw.ellipse(
+        (cx - hub_r, cy - hub_r, cx + hub_r, cy + hub_r),
+        fill=(*ACCENT_BRIGHT, 255),
+    )
 
     return img
 
@@ -149,7 +144,6 @@ def main() -> None:
         # ICO multi-size para fallback; browsers modernos preferem favicon.svg.
         write_ico(favicon_ico, [draw_icon(sz) for sz in (16, 32, 48)])
 
-    # limpa artefato de teste se existir
     for junk in ("icon2.ico",):
         p = ASSETS / junk
         if p.exists():
