@@ -28,10 +28,10 @@
   let snapshot = null;
   let selectedIp = null;
   let busy = false;
-  let dragIp = null;
   let contextIp = null;
   let renameInput = null;
   let apiReady = false;
+  let sortable = null;
 
   function statusClass(status) {
     return STATUS_CLASS[status] || "unknown";
@@ -149,7 +149,7 @@
 
     return `
       <div class="peer-row${selected}${onlineClass}" role="listitem" tabindex="0"
-           data-ip="${peer.ip}" draggable="true">
+           data-ip="${peer.ip}">
         <div class="peer-name">
           <span class="peer-avatar ${klass}" aria-hidden="true">${escapeHtml(initials(peer.name))}</span>
           <div class="peer-name-stack">
@@ -167,6 +167,53 @@
       </div>`;
   }
 
+  function destroySortable() {
+    if (sortable) {
+      sortable.destroy();
+      sortable = null;
+    }
+  }
+
+  function bindSortable() {
+    destroySortable();
+    if (!window.Sortable || !els.list.querySelector(".peer-row")) {
+      return;
+    }
+    sortable = window.Sortable.create(els.list, {
+      animation: 200,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      draggable: ".peer-row",
+      filter: ".section-header, .rename-input",
+      ghostClass: "peer-ghost",
+      chosenClass: "peer-chosen",
+      dragClass: "peer-drag",
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackTolerance: 4,
+      swapThreshold: 0.65,
+      distance: 6,
+      onStart() {
+        hideMenu();
+        setBusy(true);
+      },
+      async onEnd(evt) {
+        const fromIp = evt.item?.dataset?.ip;
+        let next = evt.item?.nextElementSibling ?? null;
+        while (next && !next.classList.contains("peer-row")) {
+          next = next.nextElementSibling;
+        }
+        const beforeIp = next ? next.dataset.ip : null;
+        const moved = evt.oldDraggableIndex !== evt.newDraggableIndex;
+        setBusy(false);
+        if (!fromIp || !moved) {
+          return;
+        }
+        await apiCall("move_peer", fromIp, beforeIp);
+        await refreshNow();
+      },
+    });
+  }
+
   function renderPeers(snap) {
     const peers = snap.peers || [];
     els.empty.classList.toggle(
@@ -174,6 +221,7 @@
       peers.length > 0 || snap.visible_count + snap.hidden_count > 0,
     );
     if (peers.length === 0) {
+      destroySortable();
       els.list.innerHTML = "";
       if (snap.visible_count + snap.hidden_count === 0) {
         els.empty.classList.remove("hidden");
@@ -200,6 +248,7 @@
       parts.push(renderPeerRow(peer));
     }
     els.list.innerHTML = parts.join("");
+    bindSortable();
   }
 
   function escapeHtml(value) {
@@ -480,62 +529,6 @@
       event.preventDefault();
       await apiCall("set_hidden", selectedIp, true);
       await refreshNow();
-    }
-  });
-
-  els.list.addEventListener("dragstart", (event) => {
-    const row = event.target.closest(".peer-row");
-    if (!row) {
-      return;
-    }
-    dragIp = row.dataset.ip;
-    setBusy(true);
-    row.classList.add("dragging");
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", dragIp);
-  });
-
-  els.list.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    const row = event.target.closest(".peer-row");
-    for (const item of els.list.querySelectorAll(".peer-row")) {
-      item.classList.toggle("drag-over", item === row);
-    }
-  });
-
-  els.list.addEventListener("dragleave", (event) => {
-    const row = event.target.closest(".peer-row");
-    if (row) {
-      row.classList.remove("drag-over");
-    }
-  });
-
-  els.list.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    const row = event.target.closest(".peer-row");
-    const targetIp = row ? row.dataset.ip : null;
-    const fromIp = dragIp;
-    dragIp = null;
-    for (const item of els.list.querySelectorAll(".peer-row")) {
-      item.classList.remove("drag-over", "dragging");
-    }
-    setBusy(false);
-    if (!fromIp) {
-      return;
-    }
-    if (targetIp && targetIp !== fromIp) {
-      await apiCall("move_peer", fromIp, targetIp);
-    } else if (!targetIp) {
-      await apiCall("move_peer", fromIp, null);
-    }
-    await refreshNow();
-  });
-
-  els.list.addEventListener("dragend", () => {
-    dragIp = null;
-    setBusy(false);
-    for (const item of els.list.querySelectorAll(".peer-row")) {
-      item.classList.remove("drag-over", "dragging");
     }
   });
 

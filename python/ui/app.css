@@ -553,13 +553,30 @@ code {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.peer-row.drag-over {
-  background: rgba(42, 159, 150, 0.14);
-  box-shadow: inset 0 2px 0 var(--accent);
+.peer-row.peer-ghost {
+  opacity: 0.4;
+  background: rgba(42, 159, 150, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(42, 159, 150, 0.4);
+  animation: none;
 }
 
-.peer-row.dragging {
-  opacity: 0.4;
+.peer-row.peer-chosen {
+  cursor: grabbing;
+  background: var(--accent-soft);
+}
+
+.peer-row.peer-drag,
+.sortable-fallback.peer-row {
+  opacity: 1;
+  cursor: grabbing;
+  background: rgba(14, 20, 26, 0.96);
+  border-radius: 10px;
+  border-bottom-color: transparent;
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(42, 159, 150, 0.45);
+  animation: none;
+  z-index: 50;
 }
 
 .peer-row:focus-visible {
