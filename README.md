@@ -27,11 +27,13 @@ A UI em `python/ui/` roda no browser com dados fictícios (sem ping real):
 
 ## Instalação (release)
 
-Nas [Releases](../../releases) baixe `NetworkMonitor-Setup-v*.exe`, execute o instalador (Program Files) e abra pelo menu Iniciar.
+Nas [Releases](../../releases) baixe `NetworkMonitor-python-installer-win-x64-v*.exe`, execute o instalador (Program Files) e abra pelo menu Iniciar.
 
 Configuração, histórico e logs ficam em `%LOCALAPPDATA%\NetworkMonitor\` (`peers.json`, `state.json`, `history.json`, `monitor.log`). A desinstalação não remove esses arquivos.
 
-Também há zips portáteis (Python e C++) na mesma release.
+Também há zips portáteis na mesma release:
+- `NetworkMonitor-python-portable-win-x64-v*.zip`
+- `NetworkMonitor-cpp-portable-win-x64-v*.zip`
 
 ## Início rápido (desenvolvimento)
 
@@ -118,7 +120,7 @@ Saída: `python/dist/NetworkMonitor/`.
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.0.0 installer\NetworkMonitor.iss
 ```
 
-Saída: `installer/Output/NetworkMonitor-Setup-v1.0.0.exe`.
+Saída: `installer/Output/NetworkMonitor-python-installer-win-x64-v1.0.0.exe`.
 
 **C++:**
 

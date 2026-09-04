@@ -34,7 +34,7 @@ python/ui/                HTML/CSS/JS do painel
 python/build.py           PyInstaller onedir
 python/tests/             pytest
 cpp/                      CMake → NetworkMonitorCpp.exe
-installer/                Inno Setup → NetworkMonitor-Setup-v*.exe
+installer/                Inno Setup → NetworkMonitor-python-installer-win-x64-v*.exe
 assets/                   icon.png / icon.ico (bandeja, GUI, exe)
 .github/workflows/        ci.yml, cd.yml
 .cursor/rules/            rules breves → skills

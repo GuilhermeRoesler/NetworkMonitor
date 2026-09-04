@@ -24,9 +24,9 @@ Runner: `windows-latest`.
 
 Triggers: tags `v*`, ou `workflow_dispatch` com input `tag`.
 
-1. `build-python` — `python/build.py` → zip `NetworkMonitor-python-win-x64-v*` + Inno Setup `NetworkMonitor-Setup-v*.exe`
-2. `build-cpp` — Release → zip `NetworkMonitorCpp-win-x64-v*`
-3. `release` — GitHub Release com Setup.exe e ambos os zips; prerelease se tag contém `-`/`rc`/`beta`/`alpha`
+1. `build-python` — `python/build.py` → zip `NetworkMonitor-python-portable-win-x64-v*` + Inno Setup `NetworkMonitor-python-installer-win-x64-v*.exe`
+2. `build-cpp` — Release → zip `NetworkMonitor-cpp-portable-win-x64-v*`
+3. `release` — GitHub Release com installer + ambos os zips; prerelease se tag contém `-`/`rc`/`beta`/`alpha`
 
 Instalador: `installer/NetworkMonitor.iss` (Program Files; dados em `%LOCALAPPDATA%\NetworkMonitor`). CI instala Inno via Chocolatey (`innosetup`).
 
