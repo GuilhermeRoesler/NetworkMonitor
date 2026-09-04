@@ -6,6 +6,11 @@
     Oculto: "oculto",
   };
 
+  const NETWORK_SECTION = {
+    radmin: "Radmin VPN",
+    lan: "LAN",
+  };
+
   const els = {
     localIps: document.getElementById("local-ips"),
     chips: document.getElementById("summary-chips"),
@@ -13,6 +18,8 @@
     empty: document.getElementById("empty-state"),
     updatedAt: document.getElementById("updated-at"),
     btnRefresh: document.getElementById("btn-refresh"),
+    btnTips: document.getElementById("btn-tips"),
+    tipsPanel: document.getElementById("tips-panel"),
     chkNotifications: document.getElementById("chk-notifications"),
     chkHidden: document.getElementById("chk-hidden"),
     menu: document.getElementById("context-menu"),
@@ -28,6 +35,60 @@
 
   function statusClass(status) {
     return STATUS_CLASS[status] || "unknown";
+  }
+
+  function networkKey(peer) {
+    return peer.network_type === "lan" ? "lan" : "radmin";
+  }
+
+  function initials(name) {
+    const parts = String(name || "")
+      .trim()
+      .split(/[\s\-_.]+/)
+      .filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    const single = parts[0] || "?";
+    return single.slice(0, 2).toUpperCase();
+  }
+
+  function formatRtt(rtt) {
+    if (rtt === null || rtt === undefined || Number.isNaN(Number(rtt))) {
+      return { text: "—", klass: "" };
+    }
+    const ms = Number(rtt);
+    let klass = "has-value good";
+    if (ms >= 80) {
+      klass = "has-value bad";
+    } else if (ms >= 40) {
+      klass = "has-value warn";
+    }
+    return { text: `${ms} ms`, klass };
+  }
+
+  function formatLastSeen(iso) {
+    if (!iso) {
+      return "";
+    }
+    const then = Date.parse(iso);
+    if (Number.isNaN(then)) {
+      return "";
+    }
+    const sec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (sec < 45) {
+      return "visto agora";
+    }
+    if (sec < 3600) {
+      const mins = Math.floor(sec / 60) || 1;
+      return `visto há ${mins} min`;
+    }
+    if (sec < 86400) {
+      const hours = Math.floor(sec / 3600);
+      return `visto há ${hours} h`;
+    }
+    const days = Math.floor(sec / 86400);
+    return `visto há ${days} d`;
   }
 
   function hideMenu() {
@@ -65,9 +126,53 @@
     els.chips.innerHTML = chips.join("");
   }
 
+  function renderPeerRow(peer) {
+    const selected = peer.ip === selectedIp ? " selected" : "";
+    const klass = statusClass(peer.status);
+    const net = networkKey(peer);
+    const mutedBadge =
+      peer.muted && !peer.hidden ? `<span class="badge-muted">Silenciado</span>` : "";
+    const rtt = formatRtt(peer.status === "Online" ? peer.rtt_ms : null);
+    const lastSeen =
+      peer.status === "Online" ? "" : formatLastSeen(peer.last_seen);
+    const onlineClass = peer.status === "Online" ? " is-online" : "";
+    const subParts = [];
+    if (peer.network_name && peer.network_name !== NETWORK_SECTION[net]) {
+      subParts.push(escapeHtml(peer.network_name));
+    }
+    if (lastSeen) {
+      subParts.push(escapeHtml(lastSeen));
+    }
+    const sub = subParts.length
+      ? `<span class="peer-sub">${subParts.join(" · ")}</span>`
+      : "";
+
+    return `
+      <div class="peer-row${selected}${onlineClass}" role="listitem" tabindex="0"
+           data-ip="${peer.ip}" draggable="true">
+        <div class="peer-name">
+          <span class="peer-avatar ${klass}" aria-hidden="true">${escapeHtml(initials(peer.name))}</span>
+          <div class="peer-name-stack">
+            <div class="peer-name-line">
+              <span class="peer-name-text">${escapeHtml(peer.name)}</span>
+              <span class="badge-net ${net}">${net === "lan" ? "LAN" : "Radmin"}</span>
+              ${mutedBadge}
+            </div>
+            ${sub}
+          </div>
+        </div>
+        <div class="peer-ip">${escapeHtml(peer.ip)}</div>
+        <div class="peer-rtt ${rtt.klass}">${rtt.text}</div>
+        <span class="status-pill ${klass}"><span class="dot"></span>${escapeHtml(peer.status)}</span>
+      </div>`;
+  }
+
   function renderPeers(snap) {
     const peers = snap.peers || [];
-    els.empty.classList.toggle("hidden", peers.length > 0 || snap.visible_count + snap.hidden_count > 0);
+    els.empty.classList.toggle(
+      "hidden",
+      peers.length > 0 || snap.visible_count + snap.hidden_count > 0,
+    );
     if (peers.length === 0) {
       els.list.innerHTML = "";
       if (snap.visible_count + snap.hidden_count === 0) {
@@ -77,26 +182,24 @@
     }
     els.empty.classList.add("hidden");
 
-    const html = peers
-      .map((peer) => {
-        const selected = peer.ip === selectedIp ? " selected" : "";
-        const mutedBadge = peer.muted && !peer.hidden
-          ? `<span class="badge-muted">Silenciado</span>`
-          : "";
-        const klass = statusClass(peer.status);
-        return `
-          <div class="peer-row${selected}" role="listitem" tabindex="0"
-               data-ip="${peer.ip}" draggable="true">
-            <div class="peer-name">
-              <span class="peer-name-text">${escapeHtml(peer.name)}</span>
-              ${mutedBadge}
-            </div>
-            <div class="peer-ip">${escapeHtml(peer.ip)}</div>
-            <span class="status-pill ${klass}"><span class="dot"></span>${escapeHtml(peer.status)}</span>
-          </div>`;
-      })
-      .join("");
-    els.list.innerHTML = html;
+    // Headers só quando o tipo muda — preserva peer_order / DnD.
+    const parts = [];
+    let lastKey = null;
+    for (const peer of peers) {
+      const key = networkKey(peer);
+      if (key !== lastKey) {
+        const title = NETWORK_SECTION[key] || key;
+        const count = peers.filter((p) => networkKey(p) === key).length;
+        parts.push(`
+          <div class="section-header ${key}" role="presentation">
+            <span>${title}</span>
+            <span class="section-count">${count}</span>
+          </div>`);
+        lastKey = key;
+      }
+      parts.push(renderPeerRow(peer));
+    }
+    els.list.innerHTML = parts.join("");
   }
 
   function escapeHtml(value) {
@@ -145,13 +248,17 @@
     cancelRename(false);
     setBusy(true);
     selectRow(ip);
-    const nameCell = row.querySelector(".peer-name");
-    nameCell.innerHTML = "";
+    const nameLine = row.querySelector(".peer-name-line");
+    const nameText = row.querySelector(".peer-name-text");
+    if (!nameLine || !nameText) {
+      setBusy(false);
+      return;
+    }
     const input = document.createElement("input");
     input.className = "rename-input";
     input.type = "text";
     input.value = peer.name;
-    nameCell.appendChild(input);
+    nameText.replaceWith(input);
     renameInput = input;
     input.focus();
     input.select();
@@ -283,8 +390,25 @@
     applySnapshot(snap);
   }
 
-  els.btnRefresh.addEventListener("click", () => {
-    refreshNow();
+  function setTipsOpen(open) {
+    els.tipsPanel.classList.toggle("hidden", !open);
+    els.btnTips.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  els.btnTips.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setTipsOpen(els.tipsPanel.classList.contains("hidden"));
+  });
+
+  els.btnRefresh.addEventListener("click", async () => {
+    els.btnRefresh.classList.add("is-busy");
+    try {
+      await refreshNow();
+    } finally {
+      window.setTimeout(() => {
+        els.btnRefresh.classList.remove("is-busy");
+      }, 450);
+    }
   });
 
   els.chkNotifications.addEventListener("change", async () => {
@@ -333,6 +457,13 @@
   document.addEventListener("click", (event) => {
     if (!els.menu.contains(event.target)) {
       hideMenu();
+    }
+    if (
+      !els.tipsPanel.contains(event.target) &&
+      event.target !== els.btnTips &&
+      !els.btnTips.contains(event.target)
+    ) {
+      setTipsOpen(false);
     }
   });
 

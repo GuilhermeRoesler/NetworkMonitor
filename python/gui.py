@@ -43,7 +43,7 @@ def resolve_ui_dir() -> Path:
 
 
 def build_snapshot(*, show_hidden: bool) -> dict:
-    from main import get_lan_ip, get_radmin_ip, load_config, load_state
+    from main import get_lan_ip, get_peer_runtime, get_radmin_ip, load_config, load_state
 
     radmin_ip = get_radmin_ip()
     lan_ip = get_lan_ip()
@@ -68,6 +68,7 @@ def build_snapshot(*, show_hidden: bool) -> dict:
             status = status_label(online)
             if online is True:
                 online_count += 1
+        runtime = get_peer_runtime(peer.ip)
         peers.append(
             {
                 "ip": peer.ip,
@@ -75,6 +76,10 @@ def build_snapshot(*, show_hidden: bool) -> dict:
                 "hidden": peer.hidden,
                 "muted": peer.muted,
                 "status": status,
+                "network_type": peer.network_type,
+                "network_name": peer.network_name,
+                "rtt_ms": runtime.get("rtt_ms"),
+                "last_seen": runtime.get("last_seen"),
             }
         )
 

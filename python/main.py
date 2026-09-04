@@ -19,6 +19,7 @@ import threading
 import time
 import winreg
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -106,6 +107,30 @@ PRIVATE_NETWORKS = (
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
 )
+
+_RTT_RE = re.compile(r"(?:tempo|time)\s*=\s*(\d+)\s*ms", re.IGNORECASE)
+_RTT_LT1_RE = re.compile(r"(?:tempo|time)\s*<\s*1\s*ms", re.IGNORECASE)
+
+# Métricas de runtime para a GUI (não persistidas).
+_peer_runtime: dict[str, dict[str, object]] = {}
+_peer_runtime_lock = threading.Lock()
+
+
+def record_peer_ping(ip: str, online: bool, rtt_ms: int | None) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _peer_runtime_lock:
+        entry = _peer_runtime.setdefault(ip, {})
+        entry["checked_at"] = now
+        if online:
+            entry["rtt_ms"] = rtt_ms
+            entry["last_seen"] = now
+        else:
+            entry["rtt_ms"] = None
+
+
+def get_peer_runtime(ip: str) -> dict[str, object]:
+    with _peer_runtime_lock:
+        return dict(_peer_runtime.get(ip, {}))
 
 
 @dataclass
@@ -516,7 +541,16 @@ def save_state(state: dict[str, bool]) -> None:
     STATE_PATH.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
 
 
-def ping_host(ip: str, timeout_ms: int = 1000) -> bool:
+def parse_ping_rtt_ms(output: str) -> int | None:
+    match = _RTT_RE.search(output)
+    if match:
+        return int(match.group(1))
+    if _RTT_LT1_RE.search(output):
+        return 0
+    return None
+
+
+def ping_host_with_rtt(ip: str, timeout_ms: int = 1000) -> tuple[bool, int | None]:
     try:
         result = subprocess.run(
             ["ping", "-n", "1", "-w", str(timeout_ms), ip],
@@ -527,10 +561,17 @@ def ping_host(ip: str, timeout_ms: int = 1000) -> bool:
             timeout=(timeout_ms / 1000) + 2,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        output = result.stdout.lower()
-        return "ttl=" in output or "ttl =" in output
+        output = result.stdout
+        lower = output.lower()
+        online = "ttl=" in lower or "ttl =" in lower
+        return online, parse_ping_rtt_ms(output) if online else None
     except (subprocess.SubprocessError, OSError):
-        return False
+        return False, None
+
+
+def ping_host(ip: str, timeout_ms: int = 1000) -> bool:
+    online, _ = ping_host_with_rtt(ip, timeout_ms)
+    return online
 
 
 def resolve_hostname(ip: str) -> str | None:
@@ -560,12 +601,12 @@ def _ping_hosts_parallel(
     *,
     max_workers: int,
     stop_event: threading.Event | None = None,
-) -> dict[str, bool]:
+) -> dict[str, tuple[bool, int | None]]:
     """Ping em paralelo com threads daemon; respeita stop_event entre hosts."""
     if not ips:
         return {}
 
-    results: dict[str, bool] = {}
+    results: dict[str, tuple[bool, int | None]] = {}
     results_lock = threading.Lock()
     next_index = 0
     index_lock = threading.Lock()
@@ -580,9 +621,9 @@ def _ping_hosts_parallel(
                 next_index += 1
             if index >= len(ips):
                 return
-            online = ping_host(ips[index], timeout_ms)
+            online, rtt_ms = ping_host_with_rtt(ips[index], timeout_ms)
             with results_lock:
-                results[ips[index]] = online
+                results[ips[index]] = (online, rtt_ms)
 
     workers = min(max_workers, len(ips))
     threads = [
@@ -619,7 +660,7 @@ def discover_peers(
     )
 
     discovered: list[Peer] = []
-    for ip, online in ping_results.items():
+    for ip, (online, _) in ping_results.items():
         if stop_event is not None and stop_event.is_set():
             break
         if not online or ip in known_ips:
@@ -784,10 +825,11 @@ def check_peers(
         stop_event=stop_event,
     )
 
-    for ip, online in ping_results.items():
+    for ip, (online, rtt_ms) in ping_results.items():
         peer = by_ip[ip]
         current[ip] = online
         peer.online = online
+        record_peer_ping(ip, online, rtt_ms)
 
         if stop_event is not None and stop_event.is_set():
             continue

@@ -53,4 +53,8 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     assert snap["online_count"] == 1
     assert snap["peers"][0]["ip"] == "26.0.0.2"
     assert snap["peers"][0]["status"] == "Online"
+    assert snap["peers"][0]["network_type"] == "radmin"
+    assert snap["peers"][0]["network_name"] == "Radmin VPN"
+    assert "rtt_ms" in snap["peers"][0]
+    assert "last_seen" in snap["peers"][0]
     assert "updated_at" in snap
