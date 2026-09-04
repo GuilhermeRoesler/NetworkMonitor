@@ -77,9 +77,35 @@ void test_save_default_and_load_config() {
     NM_CHECK(fs::exists(tmp.path() / "peers.json"));
     NM_CHECK_EQ(config.interval_seconds, 15);
     NM_CHECK(config.notifications_enabled);
+    NM_CHECK_EQ(config.history_retention_days, 7);
     NM_CHECK_EQ(config.networks.size(), static_cast<size_t>(2));
     NM_CHECK_EQ(config.networks[0].network_type, std::string("radmin"));
     NM_CHECK_EQ(config.networks[1].network_type, std::string("lan"));
+}
+
+void test_history_round_trip_and_prune() {
+    TempAppDir tmp;
+    nm::HistoryMap history;
+    nm::update_history_from_states(history, {}, {{"26.0.0.2", true}}, "2026-09-04T08:00:00");
+    NM_CHECK_EQ(history["26.0.0.2"].size(), static_cast<size_t>(1));
+    NM_CHECK(!history["26.0.0.2"][0].end.has_value());
+
+    nm::update_history_from_states(
+        history, {{"26.0.0.2", true}}, {{"26.0.0.2", false}}, "2026-09-04T09:00:00");
+    NM_CHECK(history["26.0.0.2"][0].end.has_value());
+    NM_CHECK_EQ(*history["26.0.0.2"][0].end, std::string("2026-09-04T09:00:00"));
+
+    nm::save_history(history);
+    NM_CHECK(fs::exists(tmp.path() / "history.json"));
+    const auto loaded = nm::load_history();
+    NM_CHECK_EQ(loaded.at("26.0.0.2").size(), static_cast<size_t>(1));
+
+    nm::HistoryMap with_old = loaded;
+    with_old["26.0.0.2"].insert(
+        with_old["26.0.0.2"].begin(),
+        nm::HistorySegment{"2026-08-01T10:00:00", std::string("2026-08-01T11:00:00")});
+    const auto pruned = nm::prune_history(with_old, 7, "2026-09-10T12:00:00");
+    NM_CHECK_EQ(pruned.at("26.0.0.2").size(), static_cast<size_t>(1));
 }
 
 void test_load_sample_config_and_state() {
@@ -204,6 +230,7 @@ void test_update_peer_actions() {
 void run_config_tests() {
     test_monitor_config_peer_order();
     test_save_default_and_load_config();
+    test_history_round_trip_and_prune();
     test_load_sample_config_and_state();
     test_persist_discovered_peers();
     test_update_peer_actions();

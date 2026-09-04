@@ -455,6 +455,49 @@ code {
   white-space: nowrap;
 }
 
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.field-label {
+  user-select: none;
+  white-space: nowrap;
+}
+
+.field-inline select {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 28px 6px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 55%,
+    calc(100% - 9px) 55%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+}
+
+.field-inline select:hover {
+  border-color: var(--border-strong);
+}
+
+.field-inline select:focus-visible {
+  outline: 2px solid rgba(42, 159, 150, 0.45);
+  outline-offset: 1px;
+}
+
 .table-wrap {
   flex: 1;
   min-height: 0;
@@ -551,6 +594,77 @@ code {
 .peer-row.selected {
   background: var(--accent-soft);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.peer-history {
+  padding: 10px 14px 14px 52px;
+  border-bottom: 1px solid rgba(120, 150, 165, 0.08);
+  background: rgba(8, 14, 20, 0.55);
+  animation: row-enter 220ms var(--ease) both;
+}
+
+.hist-head {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.hist-empty {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hist-days {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hist-day {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.hist-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-track {
+  position: relative;
+  height: 12px;
+  border-radius: 4px;
+  background: rgba(120, 150, 165, 0.1);
+  overflow: hidden;
+}
+
+.hist-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(62, 196, 140, 0.95), rgba(42, 159, 150, 0.85));
+  box-shadow: 0 0 0 1px rgba(62, 196, 140, 0.25);
+}
+
+.hist-axis {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: rgba(160, 180, 190, 0.55);
+}
+
+.hist-axis-scale {
+  display: flex;
+  justify-content: space-between;
 }
 
 .peer-row.peer-ghost {

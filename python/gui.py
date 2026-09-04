@@ -92,6 +92,7 @@ def build_snapshot(*, show_hidden: bool) -> dict:
         "lan_ip": lan_ip,
         "local_ips": local_ips,
         "notifications_enabled": config.notifications_enabled,
+        "history_retention_days": config.history_retention_days,
         "show_hidden": show_hidden,
         "peers": peers,
         "online_count": online_count,
@@ -119,6 +120,16 @@ class GuiApi:
 
         set_notifications_enabled(bool(enabled))
         return True
+
+    def set_history_retention(self, days: int) -> int:
+        from main import set_history_retention_days
+
+        return int(set_history_retention_days(int(days)))
+
+    def get_peer_history(self, ip: str) -> list:
+        from main import get_peer_history
+
+        return get_peer_history(str(ip))
 
     def set_show_hidden(self, show: bool) -> bool:
         self._owner.show_hidden = bool(show)
@@ -229,8 +240,8 @@ class StatusWindow:
         self._window = webview.create_window(
             title=APP_NAME,
             url=index.resolve().as_uri(),
-            width=640,
-            height=520,
+            width=680,
+            height=560,
             min_size=(480, 360),
             background_color="#0f1419",
             js_api=self._api,

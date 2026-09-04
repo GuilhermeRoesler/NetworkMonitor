@@ -16,6 +16,7 @@ def test_save_default_config_creates_peers_json(tmp_app_dir: Path) -> None:
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["interval_seconds"] == 15
     assert raw["notifications_enabled"] is True
+    assert raw["history_retention_days"] == 7
     types = {n["type"] for n in raw["networks"]}
     assert types == {"radmin", "lan"}
 
@@ -24,6 +25,7 @@ def test_load_config_reads_sample(write_sample_config: Path) -> None:
     config = main.load_config()
     assert config.interval_seconds == 15
     assert config.notifications_enabled is True
+    assert config.history_retention_days == 7
     assert len(config.networks) == 2
     visible_ips = [p.ip for p in config.peers]
     assert "26.0.0.9" not in visible_ips

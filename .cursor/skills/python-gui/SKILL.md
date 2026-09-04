@@ -20,11 +20,12 @@ description: >-
 
 ## UI
 
-- Lista: Nome · IP · Status (pills)
-- Toolbar: Atualizar · Notificações · Mostrar ocultos
+- Lista: Nome · IP · Latência · Status (pills)
+- Toolbar: Atualizar · Notificações · Mostrar ocultos · Histórico (retenção 1/3/7/14/30 dias)
 - Tema dark utilitário
 - Rename: duplo-clique ou F2; Enter confirma, Escape cancela
-- Contexto: ocultar/mostrar, silenciar, mover ao topo
+- Contexto: ver histórico, ocultar/mostrar, silenciar, mover ao topo
+- Histórico: segundo clique no peer selecionado (ou menu) abre timeline CSS por dia (00:00–24:00)
 - Drag-and-drop reordena via `move_peer` / `move_peer_to_end`
 - Muted: badge “Silenciado” (sem emoji)
 
@@ -35,6 +36,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 - Persistência só via `GuiApi` → funções de `main.py`
 - JS marca `busy` durante rename/drag e ignora snapshots nesse intervalo
+- Histórico via `get_peer_history(ip)` (não no snapshot de 3s); expansão preservada no re-render
 - `run_main_loop` / `webview.start` apenas na thread principal
 - `show()` / `close()` podem ser chamados a partir da thread da bandeja
 

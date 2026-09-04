@@ -50,6 +50,7 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     assert snap["radmin_ip"] == "26.0.0.10"
     assert snap["lan_ip"] == "192.168.0.5"
     assert snap["notifications_enabled"] is True
+    assert snap["history_retention_days"] == 7
     assert snap["online_count"] == 1
     assert snap["peers"][0]["ip"] == "26.0.0.2"
     assert snap["peers"][0]["status"] == "Online"

@@ -19,7 +19,7 @@ import threading
 import time
 import winreg
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -70,7 +70,11 @@ APP_DIR = resolve_app_dir()
 DATA_DIR = resolve_data_dir()
 CONFIG_PATH = DATA_DIR / "peers.json"
 STATE_PATH = DATA_DIR / "state.json"
+HISTORY_PATH = DATA_DIR / "history.json"
 LOG_PATH = DATA_DIR / "monitor.log"
+HISTORY_RETENTION_MIN = 1
+HISTORY_RETENTION_MAX = 90
+HISTORY_RETENTION_DEFAULT = 7
 ICON_PNG_NAME = "icon.png"
 ICON_ICO_NAME = "icon.ico"
 
@@ -159,6 +163,7 @@ class MonitorConfig:
     auto_discover: bool = True
     scan_interval_seconds: int = 300
     notifications_enabled: bool = True
+    history_retention_days: int = HISTORY_RETENTION_DEFAULT
     peer_order: list[str] = field(default_factory=list)
     networks: list[NetworkConfig] = field(default_factory=list)
 
@@ -368,6 +373,9 @@ def load_config() -> MonitorConfig:
         auto_discover=global_auto_discover,
         scan_interval_seconds=int(raw.get("scan_interval_seconds", 300)),
         notifications_enabled=bool(raw.get("notifications_enabled", True)),
+        history_retention_days=clamp_history_retention_days(
+            raw.get("history_retention_days", HISTORY_RETENTION_DEFAULT)
+        ),
         peer_order=peer_order,
         networks=networks,
     )
@@ -496,6 +504,25 @@ def notifications_enabled() -> bool:
     return load_config().notifications_enabled
 
 
+def clamp_history_retention_days(days: object) -> int:
+    try:
+        value = int(days)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        value = HISTORY_RETENTION_DEFAULT
+    return max(HISTORY_RETENTION_MIN, min(HISTORY_RETENTION_MAX, value))
+
+
+def set_history_retention_days(days: int) -> int:
+    clamped = clamp_history_retention_days(days)
+    with CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    raw["history_retention_days"] = clamped
+    CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    logging.info("Retenção de histórico: %d dia(s)", clamped)
+    return clamped
+
+
 def save_default_config() -> None:
     ensure_data_dir()
     default = {
@@ -503,6 +530,7 @@ def save_default_config() -> None:
         "auto_discover": True,
         "scan_interval_seconds": 300,
         "notifications_enabled": True,
+        "history_retention_days": HISTORY_RETENTION_DEFAULT,
         "networks": [
             {
                 "name": "Radmin VPN",
@@ -539,6 +567,140 @@ def save_state(state: dict[str, bool]) -> None:
     hidden_ips = {peer.ip for peer in config.hidden_peers}
     cleaned = {ip: online for ip, online in state.items() if ip not in hidden_ips}
     STATE_PATH.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
+
+
+def _history_now_iso(now: datetime | None = None) -> str:
+    return (now or datetime.now()).isoformat(timespec="seconds")
+
+
+def load_history() -> dict[str, list[dict[str, str | None]]]:
+    if not HISTORY_PATH.exists():
+        return {}
+    try:
+        with HISTORY_PATH.open(encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    history: dict[str, list[dict[str, str | None]]] = {}
+    for ip, segments in raw.items():
+        if not isinstance(ip, str) or not isinstance(segments, list):
+            continue
+        cleaned: list[dict[str, str | None]] = []
+        for seg in segments:
+            if not isinstance(seg, dict):
+                continue
+            start = seg.get("start")
+            if not isinstance(start, str) or not start:
+                continue
+            end = seg.get("end")
+            if end is not None and not isinstance(end, str):
+                end = None
+            cleaned.append({"start": start, "end": end})
+        if cleaned:
+            history[ip] = cleaned
+    return history
+
+
+def save_history(history: dict[str, list[dict[str, str | None]]]) -> None:
+    ensure_data_dir()
+    HISTORY_PATH.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _has_open_segment(segments: list[dict[str, str | None]]) -> bool:
+    return bool(segments) and segments[-1].get("end") is None
+
+
+def ensure_open_segment(
+    history: dict[str, list[dict[str, str | None]]],
+    ip: str,
+    now_iso: str,
+) -> None:
+    segments = history.setdefault(ip, [])
+    if not _has_open_segment(segments):
+        segments.append({"start": now_iso, "end": None})
+
+
+def close_open_segment(
+    history: dict[str, list[dict[str, str | None]]],
+    ip: str,
+    now_iso: str,
+) -> None:
+    segments = history.get(ip)
+    if not segments:
+        return
+    if segments[-1].get("end") is None:
+        segments[-1]["end"] = now_iso
+
+
+def record_history_transition(
+    history: dict[str, list[dict[str, str | None]]],
+    ip: str,
+    online: bool,
+    now: datetime | str | None = None,
+) -> None:
+    if isinstance(now, str):
+        now_iso = now
+    else:
+        now_iso = _history_now_iso(now)
+    if online:
+        ensure_open_segment(history, ip, now_iso)
+    else:
+        close_open_segment(history, ip, now_iso)
+
+
+def update_history_from_states(
+    history: dict[str, list[dict[str, str | None]]],
+    previous: dict[str, bool],
+    current: dict[str, bool],
+    now: datetime | None = None,
+) -> None:
+    now_iso = _history_now_iso(now)
+    for ip, online in current.items():
+        was = previous.get(ip)
+        if was is None:
+            if online:
+                ensure_open_segment(history, ip, now_iso)
+            continue
+        if was != online:
+            record_history_transition(history, ip, online, now_iso)
+        elif online:
+            ensure_open_segment(history, ip, now_iso)
+
+
+def prune_history(
+    history: dict[str, list[dict[str, str | None]]],
+    retention_days: int,
+    now: datetime | None = None,
+) -> dict[str, list[dict[str, str | None]]]:
+    now = now or datetime.now()
+    cutoff_iso = (now - timedelta(days=clamp_history_retention_days(retention_days))).isoformat(
+        timespec="seconds"
+    )
+    pruned: dict[str, list[dict[str, str | None]]] = {}
+    for ip, segments in history.items():
+        kept: list[dict[str, str | None]] = []
+        for seg in segments:
+            start = seg.get("start")
+            if not isinstance(start, str):
+                continue
+            end = seg.get("end")
+            if isinstance(end, str) and end < cutoff_iso:
+                continue
+            if start < cutoff_iso:
+                start = cutoff_iso
+            kept.append({"start": start, "end": end if isinstance(end, str) or end is None else None})
+        if kept:
+            pruned[ip] = kept
+    return pruned
+
+
+def get_peer_history(ip: str) -> list[dict[str, str | None]]:
+    retention = load_config().history_retention_days
+    history = prune_history(load_history(), retention)
+    return list(history.get(ip, []))
 
 
 def parse_ping_rtt_ms(output: str) -> int | None:
@@ -1232,6 +1394,7 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
 
     config = load_config()
     state = load_state()
+    history = load_history()
     last_scans: dict[str, float] = {}
 
     while not stop_event.is_set():
@@ -1282,10 +1445,16 @@ def run_monitor_loop(stop_event: threading.Event) -> None:
                 break
             continue
 
+        previous_state = dict(state)
         state = check_peers(visible_peers, state, stop_event)
         if stop_event.is_set():
             break
         save_state(state)
+
+        update_history_from_states(history, previous_state, state)
+        retention = load_config().history_retention_days
+        history = prune_history(history, retention)
+        save_history(history)
 
         online_count = sum(1 for peer in visible_peers if state.get(peer.ip))
         hidden_count = len(config.hidden_peers)
@@ -1446,6 +1615,7 @@ def show_status() -> None:
     muted_count = sum(1 for peer in config.peers if peer.muted)
     print(f"Peers silenciados: {muted_count}")
     print(f"Notificações: {'ativadas' if config.notifications_enabled else 'pausadas'}")
+    print(f"Retenção de histórico: {config.history_retention_days} dia(s)")
     print()
 
     if not config.peers:

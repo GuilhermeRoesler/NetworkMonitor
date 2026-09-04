@@ -10,13 +10,14 @@ import pytest
 
 @pytest.fixture
 def tmp_app_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Isola peers.json / state.json / monitor.log em um diretório temporário."""
+    """Isola peers.json / state.json / history.json / monitor.log em um diretório temporário."""
     import main
 
     monkeypatch.setattr(main, "APP_DIR", tmp_path)
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "CONFIG_PATH", tmp_path / "peers.json")
     monkeypatch.setattr(main, "STATE_PATH", tmp_path / "state.json")
+    monkeypatch.setattr(main, "HISTORY_PATH", tmp_path / "history.json")
     monkeypatch.setattr(main, "LOG_PATH", tmp_path / "monitor.log")
     return tmp_path
 
@@ -28,6 +29,7 @@ def sample_config_raw() -> dict:
         "auto_discover": True,
         "scan_interval_seconds": 300,
         "notifications_enabled": True,
+        "history_retention_days": 7,
         "peer_order": ["26.0.0.5", "26.0.0.2", "192.168.1.10"],
         "networks": [
             {

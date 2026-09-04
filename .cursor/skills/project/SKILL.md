@@ -16,7 +16,7 @@ App **Windows** que monitora peers **Radmin VPN** (`26.*`) e **LAN** (RFC1918) v
 |--------|------|--------|
 | Primária | `python/` | Monitor, tray (`pystray`), toast (`winotify`), GUI (WebView2/`pywebview`), startup |
 | Secundária | `cpp/` | Core CLI + UI Win32 (bandeja, toast, painel); sem startup |
-| Config | raiz | `peers.json`, `state.json`, `monitor.log` — compartilhados |
+| Config | raiz | `peers.json`, `state.json`, `history.json`, `monitor.log` — compartilhados |
 | CI/CD | `.github/workflows/` | `ci.yml` (PR), `cd.yml` (tags `v*`) |
 
 Python 3.10+ · C++17 · UI/logs em **português** · commits Conventional Commits em **inglês**.
@@ -42,7 +42,7 @@ assets/                   icon.png / icon.ico (bandeja, GUI, exe)
 
 `APP_DIR` = raiz do repo (dev) ou pasta do `.exe` (binários/assets).  
 `DATA_DIR` = mesma raiz em dev; em build instalada/empacotada = `%LOCALAPPDATA%\NetworkMonitor` (ou pasta do exe se já houver `peers.json` portátil).  
-Config/state/log sempre em `DATA_DIR`.
+Config/state/history/log sempre em `DATA_DIR`.
 
 ## Threads (Python)
 
@@ -70,5 +70,5 @@ Shutdown: `stop_event` → `status_window.close()` → `icon.stop()` → join mo
 - JSON: `indent=2`, `ensure_ascii=False` (Python) / `dump(2)` (C++).
 - Subprocess Windows: `CREATE_NO_WINDOW` em ping/ipconfig.
 - Schema novo → **Python e C++** no mesmo change.
-- Não versionar `peers.json`, `state.json`, `monitor.log` (raiz em dev; AppData na instalação).
+- Não versionar `peers.json`, `state.json`, `history.json`, `monitor.log` (raiz em dev; AppData na instalação).
 - Commits: `feat|fix|docs|refactor|chore: …` (imperativo, inglês).

@@ -37,8 +37,8 @@ Atalho: `cpp/run.bat`.
 
 | Header | Responsabilidade |
 |--------|------------------|
-| `paths.hpp` | `resolve_app_dir`, paths de config/state/log |
-| `config.hpp` | `Peer`, `NetworkConfig`, `MonitorConfig`, load/save |
+| `paths.hpp` | `resolve_app_dir`, paths de config/state/history/log |
+| `config.hpp` | `Peer`, `NetworkConfig`, `MonitorConfig`, load/save, `history.json` |
 | `ping.hpp` | ICMP + fallback `ping.exe` |
 | `network.hpp` | IPs locais, subnet, descoberta |
 | `monitor.hpp` | `check_peers`, `run_monitor_loop`, `scan_network`, `show_status` |

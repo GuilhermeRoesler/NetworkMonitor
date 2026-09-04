@@ -9,6 +9,7 @@ htmlcov/
 # Runtime data (shared at repo root)
 state.json
 peers.json
+history.json
 monitor.log
 
 # Python packaging / venv

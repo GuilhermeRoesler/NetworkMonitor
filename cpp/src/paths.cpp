@@ -109,6 +109,7 @@ void ensure_data_dir() {
 
 fs::path config_path() { return resolve_data_dir() / "peers.json"; }
 fs::path state_path() { return resolve_data_dir() / "state.json"; }
+fs::path history_path() { return resolve_data_dir() / "history.json"; }
 fs::path log_path() { return resolve_data_dir() / "monitor.log"; }
 fs::path assets_dir() { return resolve_app_dir() / "assets"; }
 fs::path icon_ico_path() { return assets_dir() / "icon.ico"; }

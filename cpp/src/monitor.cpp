@@ -90,6 +90,7 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
     emit_log(sink, "Iniciando Network Monitor (C++)");
     MonitorConfig config = load_config();
     StateMap state = load_state();
+    HistoryMap history = load_history();
     std::unordered_map<std::string, double> last_scans;
 
     while (!stop.load()) {
@@ -166,8 +167,13 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
         if (visible.empty()) {
             emit_log(sink, "Nenhum peer configurado ou encontrado. Aguardando...");
         } else {
+            const StateMap previous_state = state;
             state = check_peers(visible, state, config.notifications_enabled, sink, &stop);
             save_state(state, config);
+            const std::string now_iso = history_now_iso();
+            update_history_from_states(history, previous_state, state, now_iso);
+            history = prune_history(history, config.history_retention_days, now_iso);
+            save_history(history);
             int online_count = 0;
             for (const auto& peer : visible) {
                 if (state.count(peer.ip) && state.at(peer.ip)) {
@@ -273,7 +279,8 @@ void show_status() {
         }
     }
     std::cout << "Peers silenciados: " << muted << "\n";
-    std::cout << "Notificações: " << (config.notifications_enabled ? "ativadas" : "pausadas") << "\n\n";
+    std::cout << "Notificações: " << (config.notifications_enabled ? "ativadas" : "pausadas") << "\n";
+    std::cout << "Retenção de histórico: " << config.history_retention_days << " dia(s)\n\n";
 
     const auto peers = config.visible_peers();
     if (peers.empty()) {

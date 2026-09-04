@@ -22,11 +22,14 @@
     tipsPanel: document.getElementById("tips-panel"),
     chkNotifications: document.getElementById("chk-notifications"),
     chkHidden: document.getElementById("chk-hidden"),
+    selRetention: document.getElementById("sel-retention"),
     menu: document.getElementById("context-menu"),
   };
 
   let snapshot = null;
   let selectedIp = null;
+  let expandedIp = null;
+  let historyCache = null;
   let busy = false;
   let contextIp = null;
   let renameInput = null;
@@ -89,6 +92,166 @@
     }
     const days = Math.floor(sec / 86400);
     return `visto há ${days} d`;
+  }
+
+  function parseLocalIso(iso) {
+    if (!iso) {
+      return NaN;
+    }
+    const match = String(iso).match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/,
+    );
+    if (!match) {
+      return Date.parse(iso);
+    }
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6]),
+    ).getTime();
+  }
+
+  function startOfLocalDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function formatClock(ms) {
+    const d = new Date(ms);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
+  function formatDayLabel(dayMs, todayMs) {
+    if (dayMs === todayMs) {
+      return "Hoje";
+    }
+    const d = new Date(dayMs);
+    const yesterday = todayMs - 86400000;
+    if (dayMs === yesterday) {
+      return "Ontem";
+    }
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+  }
+
+  function clipSegmentsToDay(segments, dayStart, dayEnd) {
+    const now = Date.now();
+    const clipped = [];
+    for (const seg of segments || []) {
+      const start = parseLocalIso(seg.start);
+      if (Number.isNaN(start)) {
+        continue;
+      }
+      let end = seg.end == null ? now : parseLocalIso(seg.end);
+      if (Number.isNaN(end)) {
+        end = now;
+      }
+      if (end <= dayStart || start >= dayEnd) {
+        continue;
+      }
+      clipped.push({
+        start: Math.max(start, dayStart),
+        end: Math.min(end, dayEnd),
+      });
+    }
+    return clipped;
+  }
+
+  function buildHistoryHtml(data) {
+    const retention = Math.max(1, Number(data.retention) || 7);
+    const segments = data.segments || [];
+    const today = startOfLocalDay(new Date());
+    const days = [];
+    for (let i = 0; i < retention; i += 1) {
+      days.push(today - i * 86400000);
+    }
+
+    const rows = days
+      .map((dayStart) => {
+        const dayEnd = dayStart + 86400000;
+        const bars = clipSegmentsToDay(segments, dayStart, dayEnd)
+          .map((seg) => {
+            const left = ((seg.start - dayStart) / 86400000) * 100;
+            const width = Math.max(((seg.end - seg.start) / 86400000) * 100, 0.35);
+            const title = `${formatClock(seg.start)} – ${formatClock(seg.end)}`;
+            return `<span class="hist-bar" style="left:${left}%;width:${width}%" title="${escapeHtml(title)}"></span>`;
+          })
+          .join("");
+        return `
+          <div class="hist-day">
+            <span class="hist-label">${formatDayLabel(dayStart, today)}</span>
+            <div class="hist-track">${bars || ""}</div>
+          </div>`;
+      })
+      .join("");
+
+    const empty =
+      segments.length === 0
+        ? `<p class="hist-empty">Sem presença registrada neste período.</p>`
+        : "";
+
+    return `
+      <div class="hist-head">Presença online</div>
+      ${empty}
+      <div class="hist-days">${rows}</div>
+      <div class="hist-axis" aria-hidden="true">
+        <span class="hist-label"></span>
+        <span class="hist-axis-scale"><span>00:00</span><span>12:00</span><span>24:00</span></span>
+      </div>`;
+  }
+
+  function removeHistoryPanel() {
+    for (const panel of els.list.querySelectorAll(".peer-history")) {
+      panel.remove();
+    }
+  }
+
+  function insertHistoryPanel(ip, data) {
+    removeHistoryPanel();
+    const row = els.list.querySelector(`.peer-row[data-ip="${CSS.escape(ip)}"]`);
+    if (!row) {
+      return;
+    }
+    const panel = document.createElement("div");
+    panel.className = "peer-history";
+    panel.dataset.forIp = ip;
+    panel.innerHTML = buildHistoryHtml(data);
+    row.insertAdjacentElement("afterend", panel);
+  }
+
+  async function loadHistoryFor(ip) {
+    const segments = (await apiCall("get_peer_history", ip)) || [];
+    const retention = snapshot?.history_retention_days || 7;
+    historyCache = { ip, segments, retention };
+    insertHistoryPanel(ip, historyCache);
+  }
+
+  async function toggleHistory(ip) {
+    if (expandedIp === ip) {
+      expandedIp = null;
+      historyCache = null;
+      removeHistoryPanel();
+      return;
+    }
+    expandedIp = ip;
+    selectRow(ip);
+    await loadHistoryFor(ip);
+  }
+
+  async function restoreExpandedHistory() {
+    if (!expandedIp) {
+      return;
+    }
+    if (historyCache && historyCache.ip === expandedIp) {
+      insertHistoryPanel(expandedIp, historyCache);
+      return;
+    }
+    await loadHistoryFor(expandedIp);
   }
 
   function hideMenu() {
@@ -183,7 +346,7 @@
       animation: 200,
       easing: "cubic-bezier(0.22, 1, 0.36, 1)",
       draggable: ".peer-row",
-      filter: ".section-header, .rename-input",
+      filter: ".section-header, .rename-input, .peer-history",
       ghostClass: "peer-ghost",
       chosenClass: "peer-chosen",
       dragClass: "peer-drag",
@@ -249,6 +412,7 @@
     }
     els.list.innerHTML = parts.join("");
     bindSortable();
+    restoreExpandedHistory();
   }
 
   function escapeHtml(value) {
@@ -268,6 +432,12 @@
     els.updatedAt.textContent = snap.updated_at ? `Atualizado às ${snap.updated_at}` : "";
     els.chkNotifications.checked = !!snap.notifications_enabled;
     els.chkHidden.checked = !!snap.show_hidden;
+    if (els.selRetention) {
+      const days = String(snap.history_retention_days || 7);
+      if (els.selRetention.value !== days) {
+        els.selRetention.value = days;
+      }
+    }
     renderChips(snap);
     renderPeers(snap);
   }
@@ -370,6 +540,7 @@
     selectRow(ip);
     const items = [];
     items.push({ label: "Renomear", action: "rename" });
+    items.push({ label: "Ver histórico", action: "history" });
     items.push({ sep: true });
     items.push({ label: "Mover para o topo", action: "top" });
     items.push({ sep: true });
@@ -410,6 +581,10 @@
     }
     if (action === "rename") {
       startRename(ip);
+      return;
+    }
+    if (action === "history") {
+      await toggleHistory(ip);
       return;
     }
     if (action === "top") {
@@ -470,12 +645,37 @@
     await refreshNow();
   });
 
+  if (els.selRetention) {
+    els.selRetention.addEventListener("change", async () => {
+      const days = Number(els.selRetention.value);
+      await apiCall("set_history_retention", days);
+      if (expandedIp) {
+        historyCache = null;
+        await loadHistoryFor(expandedIp);
+      }
+      await refreshNow();
+    });
+  }
+
   els.list.addEventListener("click", (event) => {
+    if (event.target.closest(".peer-history")) {
+      return;
+    }
     const row = event.target.closest(".peer-row");
     if (!row) {
       return;
     }
-    selectRow(row.dataset.ip);
+    const ip = row.dataset.ip;
+    if (selectedIp === ip) {
+      toggleHistory(ip);
+      return;
+    }
+    if (expandedIp && expandedIp !== ip) {
+      expandedIp = null;
+      historyCache = null;
+      removeHistoryPanel();
+    }
+    selectRow(ip);
   });
 
   els.list.addEventListener("dblclick", (event) => {

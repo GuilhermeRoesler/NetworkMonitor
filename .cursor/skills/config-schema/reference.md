@@ -8,6 +8,7 @@
   "auto_discover": true,
   "scan_interval_seconds": 300,
   "notifications_enabled": true,
+  "history_retention_days": 7,
   "peer_order": ["26.0.0.2"],
   "networks": [
     {
@@ -60,6 +61,19 @@
 ```
 
 Arquivo ausente/corrupto → `{}`. Primeira transição **não** notifica (IP precisa existir em `previous`).
+
+## `history.json`
+
+```json
+{
+  "26.0.0.2": [
+    {"start": "2026-09-03T22:10:05", "end": "2026-09-04T01:05:12"},
+    {"start": "2026-09-04T08:15:00", "end": null}
+  ]
+}
+```
+
+Retenção padrão: 7 dias (`history_retention_days`). Segmentos com `end` antes do cutoff são descartados.
 
 ## Diagnóstico
 

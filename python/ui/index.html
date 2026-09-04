@@ -55,6 +55,16 @@
           <span class="switch-ui" aria-hidden="true"></span>
           <span class="switch-label">Mostrar ocultos</span>
         </label>
+        <label class="field-inline" title="Quanto tempo manter o histórico de presença">
+          <span class="field-label">Histórico</span>
+          <select id="sel-retention" aria-label="Retenção do histórico">
+            <option value="1">1 dia</option>
+            <option value="3">3 dias</option>
+            <option value="7">7 dias</option>
+            <option value="14">14 dias</option>
+            <option value="30">30 dias</option>
+          </select>
+        </label>
         <div class="toolbar-right">
           <span id="updated-at" class="muted"></span>
           <button
@@ -78,6 +88,8 @@
         <span>Delete oculta</span>
         <span class="footer-sep" aria-hidden="true">·</span>
         <span>Clique direito para mais ações</span>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>Clique de novo no selecionado para ver o histórico</span>
       </div>
 
       <div class="table-wrap">

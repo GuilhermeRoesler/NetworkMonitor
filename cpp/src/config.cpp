@@ -5,6 +5,9 @@
 #include <nlohmann_json.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <fstream>
 #include <set>
 #include <stdexcept>
@@ -191,6 +194,7 @@ void save_default_config() {
         {"auto_discover", true},
         {"scan_interval_seconds", 300},
         {"notifications_enabled", true},
+        {"history_retention_days", kHistoryRetentionDefault},
         {"networks",
          json::array(
              {json{{"name", "Radmin VPN"},
@@ -222,6 +226,8 @@ MonitorConfig load_config() {
     config.auto_discover = global_auto;
     config.scan_interval_seconds = raw.value("scan_interval_seconds", 300);
     config.notifications_enabled = raw.value("notifications_enabled", true);
+    config.history_retention_days =
+        clamp_history_retention_days(raw.value("history_retention_days", kHistoryRetentionDefault));
 
     for (const auto& network : raw.value("networks", json::array())) {
         NetworkConfig net;
@@ -289,6 +295,201 @@ void save_state(const StateMap& state, const MonitorConfig& config) {
         }
     }
     write_json(state_path(), raw);
+}
+
+int clamp_history_retention_days(int days) {
+    if (days < kHistoryRetentionMin) {
+        return kHistoryRetentionMin;
+    }
+    if (days > kHistoryRetentionMax) {
+        return kHistoryRetentionMax;
+    }
+    return days;
+}
+
+std::string history_now_iso() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    char buf[32]{};
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &local);
+    return std::string(buf);
+}
+
+HistoryMap load_history() {
+    const auto path = history_path();
+    if (!fs::exists(path)) {
+        return {};
+    }
+    try {
+        const json raw = read_json(path);
+        HistoryMap history;
+        if (!raw.is_object()) {
+            return {};
+        }
+        for (auto it = raw.begin(); it != raw.end(); ++it) {
+            if (!it.value().is_array()) {
+                continue;
+            }
+            std::vector<HistorySegment> segments;
+            for (const auto& seg : it.value()) {
+                if (!seg.is_object()) {
+                    continue;
+                }
+                const std::string start = seg.value("start", "");
+                if (start.empty()) {
+                    continue;
+                }
+                HistorySegment item;
+                item.start = start;
+                if (seg.contains("end") && !seg["end"].is_null()) {
+                    item.end = seg.value("end", "");
+                    if (item.end->empty()) {
+                        item.end.reset();
+                    }
+                }
+                segments.push_back(std::move(item));
+            }
+            if (!segments.empty()) {
+                history[it.key()] = std::move(segments);
+            }
+        }
+        return history;
+    } catch (...) {
+        return {};
+    }
+}
+
+void save_history(const HistoryMap& history) {
+    json raw = json::object();
+    for (const auto& [ip, segments] : history) {
+        json arr = json::array();
+        for (const auto& seg : segments) {
+            json item = {{"start", seg.start}};
+            if (seg.end) {
+                item["end"] = *seg.end;
+            } else {
+                item["end"] = nullptr;
+            }
+            arr.push_back(std::move(item));
+        }
+        raw[ip] = std::move(arr);
+    }
+    write_json(history_path(), raw);
+}
+
+namespace {
+
+bool has_open_segment(const std::vector<HistorySegment>& segments) {
+    return !segments.empty() && !segments.back().end.has_value();
+}
+
+void ensure_open_segment(HistoryMap& history, const std::string& ip, const std::string& now_iso) {
+    auto& segments = history[ip];
+    if (!has_open_segment(segments)) {
+        segments.push_back(HistorySegment{now_iso, std::nullopt});
+    }
+}
+
+void close_open_segment(HistoryMap& history, const std::string& ip, const std::string& now_iso) {
+    auto it = history.find(ip);
+    if (it == history.end() || it->second.empty()) {
+        return;
+    }
+    if (!it->second.back().end.has_value()) {
+        it->second.back().end = now_iso;
+    }
+}
+
+}  // namespace
+
+void record_history_transition(HistoryMap& history, const std::string& ip, bool online,
+                               const std::string& now_iso) {
+    if (online) {
+        ensure_open_segment(history, ip, now_iso);
+    } else {
+        close_open_segment(history, ip, now_iso);
+    }
+}
+
+void update_history_from_states(HistoryMap& history, const StateMap& previous, const StateMap& current,
+                                const std::string& now_iso) {
+    for (const auto& [ip, online] : current) {
+        const auto it = previous.find(ip);
+        if (it == previous.end()) {
+            if (online) {
+                ensure_open_segment(history, ip, now_iso);
+            }
+            continue;
+        }
+        if (it->second != online) {
+            record_history_transition(history, ip, online, now_iso);
+        } else if (online) {
+            ensure_open_segment(history, ip, now_iso);
+        }
+    }
+}
+
+HistoryMap prune_history(const HistoryMap& history, int retention_days, const std::string& now_iso) {
+    // Cutoff by string compare on ISO local timestamps (YYYY-MM-DDTHH:MM:SS).
+    // Approximate: subtract retention_days from the date portion of now_iso.
+    std::string cutoff = now_iso;
+    if (now_iso.size() >= 10) {
+        int year = 0;
+        int month = 0;
+        int day = 0;
+        if (std::sscanf(now_iso.c_str(), "%d-%d-%d", &year, &month, &day) == 3) {
+            std::tm tm{};
+            tm.tm_year = year - 1900;
+            tm.tm_mon = month - 1;
+            tm.tm_mday = day - clamp_history_retention_days(retention_days);
+            tm.tm_hour = 0;
+            tm.tm_min = 0;
+            tm.tm_sec = 0;
+            tm.tm_isdst = -1;
+            const std::time_t t = std::mktime(&tm);
+            if (t != static_cast<std::time_t>(-1)) {
+                std::tm local{};
+#if defined(_WIN32)
+                localtime_s(&local, &t);
+#else
+                localtime_r(&t, &local);
+#endif
+                char buf[32]{};
+                std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &local);
+                // Keep time-of-day from now_iso when possible.
+                if (now_iso.size() >= 19) {
+                    cutoff = std::string(buf).substr(0, 10) + now_iso.substr(10);
+                } else {
+                    cutoff = buf;
+                }
+            }
+        }
+    }
+
+    HistoryMap pruned;
+    for (const auto& [ip, segments] : history) {
+        std::vector<HistorySegment> kept;
+        for (const auto& seg : segments) {
+            if (seg.end && *seg.end < cutoff) {
+                continue;
+            }
+            HistorySegment copy = seg;
+            if (copy.start < cutoff) {
+                copy.start = cutoff;
+            }
+            kept.push_back(std::move(copy));
+        }
+        if (!kept.empty()) {
+            pruned[ip] = std::move(kept);
+        }
+    }
+    return pruned;
 }
 
 void persist_discovered_peers(const std::string& network_name, const std::vector<Peer>& discovered) {

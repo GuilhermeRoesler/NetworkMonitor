@@ -20,6 +20,7 @@ Dev: `python/requirements-dev.txt` (ruff, pytest)
 - `APP_DIR` = pai de `SCRIPT_DIR` (ou pasta do exe se `frozen`) — binários/assets
 - `DATA_DIR` = raiz do repo em dev; `%LOCALAPPDATA%\NetworkMonitor` se `frozen` (exceto modo portátil com `peers.json` ao lado do exe)
 - Config/state/log na `DATA_DIR` (`ensure_data_dir` antes de gravar)
+- Também `history.json` (presença online por segmentos; retenção `history_retention_days`)
 - Instalador: `installer/NetworkMonitor.iss` → Program Files; dados em AppData
 
 ## Detecção de IP
@@ -41,7 +42,8 @@ Constantes:
 2. Auto-discover se `auto_discover` e `scan_interval_seconds` (ou lista vazia)
 3. `discover_peers`: ThreadPool 32 workers, timeout 800ms + `ping -a` para hostname
 4. `check_peers` nos **visíveis**: 16 workers; toast só em **transição** e se não `muted`
-5. `save_state`
+5. Atualiza `history.json` (abre/fecha segmentos) + prune pela retenção
+6. `save_state`
 
 Ping: `ping -n 1 -w {ms}` com `CREATE_NO_WINDOW`; sucesso se saída contém `ttl=`.
 
@@ -71,7 +73,7 @@ Tray roda em daemon `radmin-tray`; a thread principal fica em `status_window.run
 
 ## APIs usadas pela GUI
 
-`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`.
+`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`.
 
 ## Onde mudar
 
