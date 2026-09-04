@@ -140,6 +140,13 @@ def main() -> None:
     ico_path = ASSETS / "icon.ico"
     write_ico(ico_path, ico_images)
 
+    ui_dir = ASSETS.parent / "python" / "ui"
+    favicon_ico = ui_dir / "favicon.ico"
+    favicon_png = ui_dir / "favicon.png"
+    if ui_dir.is_dir():
+        favicon_ico.write_bytes(ico_path.read_bytes())
+        master.resize((32, 32), Image.Resampling.LANCZOS).save(favicon_png, format="PNG")
+
     # limpa artefato de teste se existir
     for junk in ("icon2.ico",):
         p = ASSETS / junk
@@ -148,6 +155,9 @@ def main() -> None:
 
     print(f"Wrote {png_path} ({png_path.stat().st_size} bytes)")
     print(f"Wrote {ico_path} ({ico_path.stat().st_size} bytes)")
+    if ui_dir.is_dir():
+        print(f"Wrote {favicon_ico} ({favicon_ico.stat().st_size} bytes)")
+        print(f"Wrote {favicon_png} ({favicon_png.stat().st_size} bytes)")
     print("ICO sizes:", [im.size for im in ico_images])
 
 

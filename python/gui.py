@@ -253,8 +253,15 @@ class StatusWindow:
         self._closed.clear()
         self._loop_running.set()
 
+        from main import ICON_ICO_NAME, resolve_asset_path
+
+        ico = resolve_asset_path(ICON_ICO_NAME)
+        start_kwargs: dict = {"debug": False}
+        if ico is not None:
+            start_kwargs["icon"] = str(ico)
+
         try:
-            webview.start(debug=False)
+            webview.start(**start_kwargs)
         except Exception:
             logging.exception("Falha ao iniciar o WebView2")
         finally:
@@ -274,18 +281,39 @@ class StatusWindow:
             return False
         return True
 
+    def _resolve_window_hwnd(self) -> int:
+        """HWND da Form WinForms (preferido) ou FindWindowW pelo título."""
+        window = self._window
+        if window is not None:
+            native = getattr(window, "native", None)
+            handle = getattr(native, "Handle", None) if native is not None else None
+            if handle is not None:
+                try:
+                    return int(handle.ToInt32())
+                except Exception:
+                    try:
+                        return int(handle)
+                    except Exception:
+                        pass
+        if sys.platform != "win32":
+            return 0
+        try:
+            import ctypes
+
+            return int(ctypes.windll.user32.FindWindowW(None, APP_NAME) or 0)
+        except Exception:
+            return 0
+
     def _apply_window_icon(self) -> None:
         if sys.platform != "win32":
             return
         try:
-            import ctypes
-
             from main import ICON_ICO_NAME, resolve_asset_path, set_win32_window_icons
 
             ico = resolve_asset_path(ICON_ICO_NAME)
             if ico is None:
                 return
-            hwnd = int(ctypes.windll.user32.FindWindowW(None, APP_NAME) or 0)
+            hwnd = self._resolve_window_hwnd()
             if not hwnd:
                 return
             handles = set_win32_window_icons(hwnd, ico)

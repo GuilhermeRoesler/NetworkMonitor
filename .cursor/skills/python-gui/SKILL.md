@@ -47,6 +47,11 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 3. Incluir no snapshot se for estado exibido
 4. Manter textos em português
 
+## Ícone / favicon
+
+- Janela/taskbar: `webview.start(icon=…)` com `assets/icon.ico` via `resolve_asset_path`; fallback Win32 em `_apply_window_icon` (HWND de `window.native.Handle`).
+- Favicon do painel: `python/ui/favicon.ico` + `favicon.png` (gerados por `assets/_generate_icon.py`), linkados em `index.html`.
+
 ## Build
 
 - `python/build.py` empacota `ui/` (`--add-data`) e `--collect-all=webview`
