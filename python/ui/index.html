@@ -122,6 +122,39 @@
             </div>
           </div>
 
+          <div class="view-tabs" role="tablist" aria-label="Áreas do painel">
+            <button
+              type="button"
+              class="view-tab is-active"
+              id="tab-peers"
+              role="tab"
+              aria-selected="true"
+              aria-controls="view-peers"
+              data-view="peers"
+            >
+              Peers
+            </button>
+            <button
+              type="button"
+              class="view-tab"
+              id="tab-adapters"
+              role="tab"
+              aria-selected="false"
+              aria-controls="view-adapters"
+              data-view="adapters"
+            >
+              Adaptadores
+            </button>
+          </div>
+        </div>
+
+        <div
+          id="view-peers"
+          class="view-pane is-active"
+          role="tabpanel"
+          aria-labelledby="tab-peers"
+          data-view="peers"
+        >
           <div class="filter-bar">
             <label class="search-field" for="search-peers">
               <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -186,38 +219,60 @@
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="panel-board">
-          <div class="table-wrap">
-            <div class="table-head" role="row">
-              <span>Nome</span>
-              <span>IP</span>
-              <span>Latência</span>
-              <span>Status</span>
-            </div>
-            <div class="list-scroll" id="list-scroll">
-              <div id="peer-list" class="peer-list" role="list"></div>
-              <div id="empty-state" class="empty-state hidden">
-                <div class="empty-art" aria-hidden="true">
-                  <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-opacity="0.15" stroke-width="1.5" />
-                    <circle cx="48" cy="48" r="30" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5" />
-                    <circle cx="48" cy="48" r="16" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
-                    <circle cx="48" cy="48" r="4" fill="currentColor" fill-opacity="0.7" />
-                    <path d="M48 48 L72 28" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                    <circle cx="72" cy="28" r="3" fill="currentColor" />
-                  </svg>
-                </div>
-                <p class="empty-title" id="empty-title">Nenhum peer configurado</p>
-                <p class="muted empty-copy" id="empty-copy">
-                  Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.
-                </p>
+          <div class="panel-board">
+            <div class="table-wrap">
+              <div class="table-head" role="row">
+                <span>Nome</span>
+                <span>IP</span>
+                <span>Latência</span>
+                <span>Status</span>
               </div>
-              <div class="scroll-fade scroll-fade-top" aria-hidden="true"></div>
-              <div class="scroll-fade scroll-fade-bottom" aria-hidden="true"></div>
+              <div class="list-scroll" id="list-scroll">
+                <div id="peer-list" class="peer-list" role="list"></div>
+                <div id="empty-state" class="empty-state hidden">
+                  <div class="empty-art" aria-hidden="true">
+                    <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-opacity="0.15" stroke-width="1.5" />
+                      <circle cx="48" cy="48" r="30" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5" />
+                      <circle cx="48" cy="48" r="16" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+                      <circle cx="48" cy="48" r="4" fill="currentColor" fill-opacity="0.7" />
+                      <path d="M48 48 L72 28" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                      <circle cx="72" cy="28" r="3" fill="currentColor" />
+                    </svg>
+                  </div>
+                  <p class="empty-title" id="empty-title">Nenhum peer configurado</p>
+                  <p class="muted empty-copy" id="empty-copy">
+                    Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.
+                  </p>
+                </div>
+                <div class="scroll-fade scroll-fade-top" aria-hidden="true"></div>
+                <div class="scroll-fade scroll-fade-bottom" aria-hidden="true"></div>
+              </div>
             </div>
           </div>
+        </div>
+
+        <div
+          id="view-adapters"
+          class="view-pane"
+          role="tabpanel"
+          aria-labelledby="tab-adapters"
+          data-view="adapters"
+          hidden
+        >
+          <section class="adapters-panel" aria-labelledby="adapters-title">
+            <div class="adapters-head">
+              <div>
+                <h2 id="adapters-title" class="adapters-title">Adaptadores monitorados</h2>
+                <p class="adapters-hint muted">
+                  Por padrão só a rede local. Marque VPNs (Tailscale, WireGuard, etc.) para incluir na descoberta.
+                </p>
+              </div>
+            </div>
+            <div id="adapters-list" class="adapters-list" role="group" aria-labelledby="adapters-title"></div>
+            <p id="adapters-empty" class="adapters-empty muted hidden">Nenhum adaptador detectado.</p>
+          </section>
         </div>
 
         <footer class="panel-status">

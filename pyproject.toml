@@ -2,7 +2,7 @@
 name = "network-monitor"
 version = "0.1.0"
 requires-python = ">=3.10"
-description = "Monitor de peers Radmin VPN e LAN para Windows"
+description = "Monitor de peers em rede local e VPNs para Windows"
 
 [tool.ruff]
 target-version = "py310"

@@ -7,6 +7,91 @@ import logging
 
 from nm import paths
 from nm.models import MonitorConfig, NetworkConfig, Peer
+from nm.network import (
+    DEFAULT_NETWORK_NAMES,
+    adapter_id,
+    default_adapter_enabled,
+    is_adapter_monitored,
+    list_local_interfaces,
+)
+
+
+def _parse_monitored_adapters(raw: dict) -> dict[str, bool]:
+    value = raw.get("monitored_adapters", {})
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): bool(enabled) for key, enabled in value.items()}
+
+
+def _enabled_network_types(raw: dict) -> set[str]:
+    return {
+        str(network.get("type", "lan"))
+        for network in raw.get("networks", [])
+        if network.get("enabled", True)
+    }
+
+
+def ensure_monitored_adapters(raw: dict) -> dict[str, bool]:
+    """Garante mapa de adaptadores; migra installs antigas a partir de networks[].enabled."""
+    interfaces = list_local_interfaces()
+    existing = raw.get("monitored_adapters")
+    migrating = existing is None
+    monitored = _parse_monitored_adapters(raw) if not migrating else {}
+    legacy_types = _enabled_network_types(raw) if migrating else set()
+    changed = migrating
+
+    for iface in interfaces:
+        if iface.id in monitored:
+            continue
+        if migrating:
+            enabled = iface.network_type in legacy_types
+        else:
+            enabled = default_adapter_enabled(iface.network_type)
+        monitored[iface.id] = enabled
+        changed = True
+
+    if changed:
+        raw["monitored_adapters"] = monitored
+    else:
+        raw.setdefault("monitored_adapters", monitored)
+    return monitored
+
+
+def ensure_network_bucket(raw: dict, network_type: str) -> dict:
+    networks = raw.setdefault("networks", [])
+    for network in networks:
+        if network.get("type") == network_type:
+            return network
+    bucket = {
+        "name": DEFAULT_NETWORK_NAMES.get(network_type, network_type),
+        "type": network_type,
+        "enabled": False,
+        "auto_discover": True,
+        "peers": [],
+    }
+    networks.append(bucket)
+    return bucket
+
+
+def sync_network_enabled_for_type(raw: dict, network_type: str) -> None:
+    """Atualiza enabled da rede conforme adaptadores monitorados daquele tipo."""
+    monitored = _parse_monitored_adapters(raw)
+    any_enabled = False
+    for key, enabled in monitored.items():
+        if not enabled:
+            continue
+        key_type = key.split(":", 1)[0] if ":" in key else "lan"
+        if key_type == network_type:
+            any_enabled = True
+            break
+    if not any_enabled:
+        for iface in list_local_interfaces():
+            if iface.network_type == network_type and is_adapter_monitored(iface, monitored):
+                any_enabled = True
+                break
+
+    bucket = ensure_network_bucket(raw, network_type)
+    bucket["enabled"] = any_enabled
 
 
 def load_config() -> MonitorConfig:
@@ -17,11 +102,13 @@ def load_config() -> MonitorConfig:
         raw = json.load(handle)
 
     original_order = list(raw.get("peer_order", []))
+    original_monitored = raw.get("monitored_adapters")
     global_auto_discover = bool(raw.get("auto_discover", True))
+    monitored_adapters = ensure_monitored_adapters(raw)
     networks: list[NetworkConfig] = []
 
     for network in raw.get("networks", []):
-        network_type = network.get("type", "radmin")
+        network_type = network.get("type", "lan")
         network_name = network.get("name", "Rede")
         auto_discover = network.get("auto_discover")
         if auto_discover is None:
@@ -53,7 +140,8 @@ def load_config() -> MonitorConfig:
         )
 
     peer_order = ensure_peer_order(raw)
-    if peer_order != original_order:
+    adapters_changed = raw.get("monitored_adapters") != original_monitored
+    if peer_order != original_order or adapters_changed:
         paths.CONFIG_PATH.write_text(
             json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -67,6 +155,7 @@ def load_config() -> MonitorConfig:
             raw.get("history_retention_days", paths.HISTORY_RETENTION_DEFAULT)
         ),
         peer_order=peer_order,
+        monitored_adapters=monitored_adapters,
         networks=networks,
     )
 
@@ -213,16 +302,10 @@ def save_default_config() -> None:
         "scan_interval_seconds": 300,
         "notifications_enabled": True,
         "history_retention_days": paths.HISTORY_RETENTION_DEFAULT,
+        "monitored_adapters": {},
         "networks": [
             {
-                "name": "Radmin VPN",
-                "type": "radmin",
-                "enabled": True,
-                "auto_discover": True,
-                "peers": [],
-            },
-            {
-                "name": "Rede Local (LAN)",
+                "name": DEFAULT_NETWORK_NAMES["lan"],
                 "type": "lan",
                 "enabled": True,
                 "auto_discover": True,
@@ -233,6 +316,51 @@ def save_default_config() -> None:
     paths.CONFIG_PATH.write_text(
         json.dumps(default, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+
+def set_adapter_monitored(adapter_key: str, enabled: bool) -> bool:
+    """Ativa/desativa monitoramento de um adaptador detectado."""
+    key = str(adapter_key).strip()
+    if not key or ":" not in key:
+        return False
+
+    network_type, _, _slug = key.partition(":")
+    if not network_type:
+        return False
+
+    with paths.CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    monitored = ensure_monitored_adapters(raw)
+    monitored[key] = bool(enabled)
+    raw["monitored_adapters"] = monitored
+    sync_network_enabled_for_type(raw, network_type)
+    paths.CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    status = "ativado" if enabled else "desativado"
+    logging.info("Adaptador %s: monitoramento %s", key, status)
+    return True
+
+
+def resolve_adapter_key(
+    adapter_key: str | None = None,
+    *,
+    name: str | None = None,
+    network_type: str | None = None,
+    ip: str | None = None,
+) -> str | None:
+    if adapter_key:
+        return adapter_key
+    for iface in list_local_interfaces():
+        if name and iface.name != name:
+            continue
+        if network_type and iface.network_type != network_type:
+            continue
+        if ip and iface.ip != ip:
+            continue
+        return iface.id
+    if name and network_type:
+        return adapter_id(network_type, name)
+    return None
 
 
 def update_peer_name(ip: str, new_name: str) -> bool:

@@ -3,9 +3,9 @@ name: config-schema
 description: >-
   Schema compartilhado peers.json, state.json e history.json do Network Monitor
   (Python e C++). Use ao adicionar/alterar campos de peer, rede, peer_order,
-  retenção de histórico, defaults de config, normalização de ordem, ou qualquer
-  mudança que afete load_config/save_state/history em python/nm/config.py,
-  python/nm/state.py, python/nm/history.py ou cpp config.
+  retenção de histórico, defaults de config, normalização de ordem, adaptadores
+  monitorados, ou qualquer mudança que afete load_config/save_state/history em
+  python/nm/config.py, python/nm/state.py, python/nm/history.py ou cpp config.
 ---
 
 # Config schema (`peers.json` / `state.json` / `history.json`)
@@ -31,10 +31,23 @@ Runtime também tem `network_name` / `network_type` derivados da rede pai.
 | Campo | Tipo | Default |
 |-------|------|---------|
 | `name` | string | `"Rede"` |
-| `type` | `"radmin"` \| `"lan"` | `"radmin"` |
+| `type` | `"lan"` \| `"radmin"` \| `"tailscale"` \| `"wireguard"` | `"lan"` |
 | `enabled` | bool | `true` |
 | `auto_discover` | bool | herda global se omitido |
 | `peers` | object[] | `[]` |
+
+Buckets de peers por tipo. Criados sob demanda ao ativar um adaptador (Tailscale, WireGuard, etc.).
+
+### Adaptadores monitorados
+
+| Campo | Tipo | Default | Notas |
+|-------|------|---------|--------|
+| `monitored_adapters` | object `{ "<id>": bool }` | `{}` | id = `{type}:{slug-do-nome}` |
+
+- Ausente no mapa → default: **`lan` = on**, demais tipos = **off**
+- Migração: se o campo não existir, seeds a partir de `networks[].enabled` + interfaces detectadas
+- Painel: seção/aba “Adaptadores” (checkboxes)
+- API: `set_adapter_monitored(id, enabled)` (Python/C++)
 
 ### Raiz
 
@@ -46,7 +59,8 @@ Runtime também tem `network_name` / `network_type` derivados da rede pai.
 | `notifications_enabled` | bool | `true` |
 | `history_retention_days` | int | `7` (clamp 1–90) |
 | `peer_order` | string[] | IPs; visíveis antes de ocultos |
-| `networks` | object[] | Radmin + LAN por default |
+| `monitored_adapters` | object | `{}` |
+| `networks` | object[] | só **Rede local** (`lan`) por default |
 
 ### `state.json`
 
@@ -58,7 +72,7 @@ Mapa IP → segmentos de presença online:
 
 ```json
 {
-  "26.0.0.2": [
+  "192.168.1.10": [
     {"start": "2026-09-03T22:10:05", "end": "2026-09-04T01:05:12"},
     {"start": "2026-09-04T08:15:00", "end": null}
   ]
@@ -85,7 +99,7 @@ Qualquer campo novo/alterado:
 
 1. `python/nm/config.py` (+ `state.py` / `history.py` se afetar) — `load_config` / `save_default_config` / setters
 2. `cpp/include/config.hpp` + `cpp/src/config.cpp`
-3. GUI se for visível (`python/gui.py`)
+3. GUI se for visível (`python/gui.py` + `python/ui/`)
 4. Testes: `python/tests/test_config.py`, `test_peer_order.py`, `test_history.py`, `cpp/tests/test_config.cpp`
 
 ## Persistência

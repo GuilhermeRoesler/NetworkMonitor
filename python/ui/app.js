@@ -7,9 +7,13 @@
   };
 
   const NETWORK_SECTION = {
+    lan: "Rede local",
     radmin: "Radmin VPN",
-    lan: "LAN",
+    tailscale: "Tailscale",
+    wireguard: "WireGuard",
   };
+
+  const NETWORK_ORDER = ["lan", "radmin", "tailscale", "wireguard"];
 
   const RETENTION_LABELS = {
     1: "1 dia",
@@ -22,12 +26,18 @@
   const STORAGE = {
     density: "nm-ui-density",
     status: "nm-ui-status-filter",
+    view: "nm-ui-view",
   };
 
   const els = {
     app: document.querySelector(".app"),
     localIps: document.getElementById("local-ips"),
     chips: document.getElementById("summary-chips"),
+    viewTabs: document.querySelector(".view-tabs"),
+    viewPeers: document.getElementById("view-peers"),
+    viewAdapters: document.getElementById("view-adapters"),
+    adaptersList: document.getElementById("adapters-list"),
+    adaptersEmpty: document.getElementById("adapters-empty"),
     list: document.getElementById("peer-list"),
     listScroll: document.getElementById("list-scroll"),
     empty: document.getElementById("empty-state"),
@@ -69,13 +79,53 @@
   let searchTimer = null;
   let pollMs = 15000;
   let pollTimer = null;
+  let activeView = "peers";
+
+  function setActiveView(view) {
+    const next = view === "adapters" ? "adapters" : "peers";
+    activeView = next;
+    try {
+      localStorage.setItem(STORAGE.view, next);
+    } catch {
+      /* ignore */
+    }
+
+    if (els.viewTabs) {
+      for (const tab of els.viewTabs.querySelectorAll(".view-tab")) {
+        const selected = tab.dataset.view === next;
+        tab.classList.toggle("is-active", selected);
+        tab.setAttribute("aria-selected", selected ? "true" : "false");
+        tab.tabIndex = selected ? 0 : -1;
+      }
+    }
+
+    for (const pane of [els.viewPeers, els.viewAdapters]) {
+      if (!pane) {
+        continue;
+      }
+      const selected = pane.dataset.view === next;
+      pane.classList.toggle("is-active", selected);
+      if (selected) {
+        pane.removeAttribute("hidden");
+      } else {
+        pane.setAttribute("hidden", "");
+      }
+    }
+
+    if (next === "peers") {
+      requestAnimationFrame(updateScrollFades);
+    } else {
+      hideMenu();
+    }
+  }
 
   function statusClass(status) {
     return STATUS_CLASS[status] || "unknown";
   }
 
   function networkKey(peer) {
-    return peer.network_type === "lan" ? "lan" : "radmin";
+    const type = String(peer.network_type || "lan");
+    return NETWORK_SECTION[type] ? type : "lan";
   }
 
   function initials(name) {
@@ -451,7 +501,9 @@
     const parts = [];
     for (const child of els.list.children) {
       if (child.classList.contains("section-header")) {
-        const key = child.classList.contains("lan") ? "lan" : "radmin";
+        const key =
+          ["lan", "radmin", "tailscale", "wireguard"].find((k) => child.classList.contains(k)) ||
+          "lan";
         parts.push(`h:${key}`);
       } else if (child.classList.contains("peer-row") && child.dataset.ip) {
         parts.push(`p:${child.dataset.ip}`);
@@ -605,7 +657,9 @@
       }
     }
     for (const header of els.list.querySelectorAll(".section-header")) {
-      const key = header.classList.contains("lan") ? "lan" : "radmin";
+      const key =
+        ["lan", "radmin", "tailscale", "wireguard"].find((k) => header.classList.contains(k)) ||
+        "lan";
       const countEl = header.querySelector(".section-count");
       if (countEl) {
         countEl.textContent = String(
@@ -613,6 +667,51 @@
         );
       }
     }
+  }
+
+  function renderAdapters(snap) {
+    if (!els.adaptersList) {
+      return;
+    }
+    const adapters = snap.adapters || [];
+    if (!adapters.length) {
+      els.adaptersList.innerHTML = "";
+      els.adaptersEmpty?.classList.remove("hidden");
+      return;
+    }
+    els.adaptersEmpty?.classList.add("hidden");
+    const sorted = [...adapters].sort((a, b) => {
+      const ai = NETWORK_ORDER.indexOf(a.network_type);
+      const bi = NETWORK_ORDER.indexOf(b.network_type);
+      const ao = ai === -1 ? 99 : ai;
+      const bo = bi === -1 ? 99 : bi;
+      if (ao !== bo) {
+        return ao - bo;
+      }
+      return String(a.name).localeCompare(String(b.name), "pt");
+    });
+    els.adaptersList.innerHTML = sorted
+      .map((adapter) => {
+        const checked = adapter.enabled ? "checked" : "";
+        const type = escapeHtml(adapter.network_type || "lan");
+        const label = escapeHtml(adapter.label || adapter.network_type || "Rede");
+        const name = escapeHtml(adapter.name || "");
+        const ip = escapeHtml(adapter.ip || "");
+        const id = escapeHtml(adapter.id || "");
+        return `
+          <label class="adapter-row ${type}">
+            <input type="checkbox" data-adapter-id="${id}" ${checked} />
+            <span class="adapter-check" aria-hidden="true"></span>
+            <span class="adapter-copy">
+              <span class="adapter-name">${name}</span>
+              <span class="adapter-meta">
+                <span class="badge-net ${type}">${label}</span>
+                <span class="adapter-ip">${ip}</span>
+              </span>
+            </span>
+          </label>`;
+      })
+      .join("");
   }
 
   function destroySortable() {
@@ -883,13 +982,16 @@
     try {
       const savedDensity = localStorage.getItem(STORAGE.density);
       const savedStatus = localStorage.getItem(STORAGE.status);
+      const savedView = localStorage.getItem(STORAGE.view);
       setDensity(savedDensity === "compact" ? "compact" : "comfortable");
       setStatusFilter(
         ["all", "online", "offline", "other"].includes(savedStatus) ? savedStatus : "all",
       );
+      setActiveView(savedView === "adapters" ? "adapters" : "peers");
     } catch {
       setDensity("comfortable");
       setStatusFilter("all");
+      setActiveView("peers");
     }
   }
 
@@ -980,6 +1082,7 @@
     els.chkHidden.checked = !!snap.show_hidden;
     setRetentionUi(snap.history_retention_days || 7);
     renderChips(snap);
+    renderAdapters(snap);
     renderPeers(snap);
   }
 
@@ -1203,6 +1306,61 @@
     await refreshNow();
   });
 
+  if (els.adaptersList) {
+    els.adaptersList.addEventListener("change", async (event) => {
+      const input = event.target.closest("input[data-adapter-id]");
+      if (!input) {
+        return;
+      }
+      const adapterId = input.dataset.adapterId;
+      if (!adapterId) {
+        return;
+      }
+      input.disabled = true;
+      try {
+        await apiCall("set_adapter_monitored", adapterId, input.checked);
+        await refreshNow();
+      } finally {
+        input.disabled = false;
+      }
+    });
+  }
+
+  if (els.viewTabs) {
+    els.viewTabs.addEventListener("click", (event) => {
+      const tab = event.target.closest(".view-tab");
+      if (!tab || !els.viewTabs.contains(tab)) {
+        return;
+      }
+      setActiveView(tab.dataset.view);
+    });
+
+    els.viewTabs.addEventListener("keydown", (event) => {
+      const tabs = [...els.viewTabs.querySelectorAll(".view-tab")];
+      const current = document.activeElement;
+      const index = tabs.indexOf(current);
+      if (index < 0) {
+        return;
+      }
+      let next = -1;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        next = (index + 1) % tabs.length;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        next = (index - 1 + tabs.length) % tabs.length;
+      } else if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = tabs.length - 1;
+      }
+      if (next < 0) {
+        return;
+      }
+      event.preventDefault();
+      tabs[next].focus();
+      setActiveView(tabs[next].dataset.view);
+    });
+  }
+
   els.chkHidden.addEventListener("change", async () => {
     await apiCall("set_show_hidden", els.chkHidden.checked);
     await refreshNow();
@@ -1394,6 +1552,7 @@
       tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable;
     if (
       !inField &&
+      activeView === "peers" &&
       (event.key === "/" || (event.key === "f" && (event.ctrlKey || event.metaKey)))
     ) {
       event.preventDefault();

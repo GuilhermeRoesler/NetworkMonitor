@@ -9,27 +9,26 @@
   "scan_interval_seconds": 300,
   "notifications_enabled": true,
   "history_retention_days": 7,
-  "peer_order": ["26.0.0.2"],
+  "peer_order": ["192.168.1.10"],
+  "monitored_adapters": {
+    "lan:ethernet": true,
+    "tailscale:tailscale": false
+  },
   "networks": [
     {
-      "name": "Radmin VPN",
-      "type": "radmin",
-      "enabled": true,
-      "auto_discover": true,
-      "peers": [
-        { "name": "PC-Amigo", "ip": "26.0.0.2" }
-      ]
-    },
-    {
-      "name": "Rede Local (LAN)",
+      "name": "Rede local",
       "type": "lan",
       "enabled": true,
       "auto_discover": true,
-      "peers": []
+      "peers": [
+        { "name": "NAS", "ip": "192.168.1.10" }
+      ]
     }
   ]
 }
 ```
+
+Tipos de rede conhecidos: `lan`, `radmin`, `tailscale`, `wireguard`. Por padrão só `lan` vem habilitado; VPNs entram via checkboxes no painel (ou editando `monitored_adapters`).
 
 ## Flags de peer
 
@@ -41,7 +40,7 @@
 
 ## Rede desabilitada
 
-`"enabled": false` → `process_network` ignora; peers ficam no JSON.
+`"enabled": false` → `process_network` ignora; peers ficam no JSON. Desmarcar o último adaptador de um tipo no painel desabilita a rede correspondente.
 
 ## Auto-descoberta off
 
@@ -55,8 +54,8 @@
 
 ```json
 {
-  "26.0.0.2": true,
-  "192.168.1.100": false
+  "192.168.1.10": true,
+  "10.0.0.5": false
 }
 ```
 
@@ -66,7 +65,7 @@ Arquivo ausente/corrupto → `{}`. Primeira transição **não** notifica (IP pr
 
 ```json
 {
-  "26.0.0.2": [
+  "192.168.1.10": [
     {"start": "2026-09-03T22:10:05", "end": "2026-09-04T01:05:12"},
     {"start": "2026-09-04T08:15:00", "end": null}
   ]

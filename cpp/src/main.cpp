@@ -40,9 +40,9 @@ void print_help() {
         << "  --run         Executa apenas o monitor no console\n"
         << "  --gui         Monitor + painel Win32\n"
         << "  --status      Mostra status atual\n"
-        << "  --scan        Escaneia sub-rede Radmin\n"
-        << "  --scan-lan    Escaneia sub-rede LAN\n"
-        << "  --scan-all    Escaneia Radmin e LAN\n"
+        << "  --scan        Escaneia os adaptadores monitorados\n"
+        << "  --scan-lan    Escaneia todas as sub-redes LAN detectadas\n"
+        << "  --scan-all    Escaneia todos os adaptadores detectados (LAN e VPNs)\n"
         << "  --help        Esta ajuda\n\n"
         << "Config compartilhada: " << nm::config_path().string() << "\n";
 }
@@ -90,18 +90,15 @@ int main(int argc, char** argv) {
         }
         if (mode == "scan") {
             ensure_console();
-            return nm::scan_network("radmin") ? 0 : 1;
+            return nm::scan_monitored() ? 0 : 1;
         }
         if (mode == "scan-lan") {
             ensure_console();
-            return nm::scan_network("lan") ? 0 : 1;
+            return nm::scan_network("lan", false) ? 0 : 1;
         }
         if (mode == "scan-all") {
             ensure_console();
-            nm::scan_network("radmin");
-            std::cout << "\n";
-            nm::scan_network("lan");
-            return 0;
+            return nm::scan_all_detected() ? 0 : 1;
         }
         if (mode == "run") {
             ensure_console();

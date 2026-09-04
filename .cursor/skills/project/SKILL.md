@@ -8,7 +8,9 @@ description: >-
 
 # Network Monitor — Projeto
 
-App **Windows** que monitora peers **Radmin VPN** (`26.*`) e **LAN** (RFC1918) via ping, com toast e bandeja na versão Python.
+App **Windows** que monitora peers em **rede local** (RFC1918) e **VPNs opcionais** (Tailscale, WireGuard, etc.) via ping, com toast e bandeja na versão Python.
+
+Por padrão só a LAN é monitorada; o usuário escolhe adaptadores no painel (`monitored_adapters`).
 
 ## Stack
 

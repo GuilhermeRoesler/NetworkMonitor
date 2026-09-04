@@ -708,7 +708,7 @@ void StatusWindow::refresh_now(bool force_network) {
         snapshot_.radmin_ip = get_radmin_ip().value_or("");
         snapshot_.lan_ip = get_lan_ip().value_or("");
         snapshot_.lan_ips = get_lan_ips();
-        snapshot_.local_ips = format_local_interfaces();
+        snapshot_.local_ips = format_local_interfaces(get_monitored_interfaces(config.monitored_adapters));
         has_snapshot_ = true;
     }
     snapshot_.visible_count = static_cast<int>(config.visible_peers().size());

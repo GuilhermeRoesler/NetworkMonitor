@@ -85,6 +85,14 @@ Ethernet adapter Radmin VPN:
 
    IPv4 Address. . . . . . . . . . . : 26.0.0.8
 
+Ethernet adapter Tailscale:
+
+   IPv4 Address. . . . . . . . . . . : 100.64.1.20
+
+Ethernet adapter WireGuard Tunnel:
+
+   IPv4 Address. . . . . . . . . . . : 10.8.0.2
+
 Ethernet adapter vEthernet (Default Switch):
 
    IPv4 Address. . . . . . . . . . . : 172.20.80.1
@@ -95,10 +103,46 @@ Ethernet adapter Local Area Connection:
 """
     ifaces = network.parse_ipconfig_interfaces(output)
     by_ip = {iface.ip: iface for iface in ifaces}
-    assert set(by_ip) == {"192.168.1.10", "10.0.0.5", "26.0.0.8"}
+    assert set(by_ip) == {"192.168.1.10", "10.0.0.5", "26.0.0.8", "100.64.1.20", "10.8.0.2"}
     assert by_ip["192.168.1.10"].network_type == "lan"
     assert by_ip["10.0.0.5"].network_type == "lan"
     assert by_ip["26.0.0.8"].network_type == "radmin"
+    assert by_ip["100.64.1.20"].network_type == "tailscale"
+    assert by_ip["10.8.0.2"].network_type == "wireguard"
+
+
+def test_is_tailscale_ip() -> None:
+    assert network.is_tailscale_ip("100.64.0.1") is True
+    assert network.is_tailscale_ip("100.127.255.255") is True
+    assert network.is_tailscale_ip("100.63.0.1") is False
+    assert network.is_tailscale_ip("192.168.1.1") is False
+
+
+def test_adapter_id_and_default_enabled() -> None:
+    assert network.adapter_id("lan", "Ethernet") == "lan:ethernet"
+    assert network.default_adapter_enabled("lan") is True
+    assert network.default_adapter_enabled("tailscale") is False
+    assert (
+        network.is_adapter_monitored(
+            network.LocalInterface("Tailscale", "100.64.1.2", "tailscale"),
+            {},
+        )
+        is False
+    )
+    assert (
+        network.is_adapter_monitored(
+            network.LocalInterface("Ethernet", "192.168.1.10", "lan"),
+            {},
+        )
+        is True
+    )
+    assert (
+        network.is_adapter_monitored(
+            network.LocalInterface("Tailscale", "100.64.1.2", "tailscale"),
+            {"tailscale:tailscale": True},
+        )
+        is True
+    )
 
 
 def test_parse_ipconfig_interfaces_pt_br() -> None:
@@ -127,10 +171,12 @@ def test_format_local_interfaces() -> None:
     ifaces = [
         network.LocalInterface("Radmin VPN", "26.0.0.8", "radmin"),
         network.LocalInterface("Ethernet", "192.168.1.10", "lan"),
+        network.LocalInterface("Tailscale", "100.64.1.2", "tailscale"),
     ]
     text = network.format_local_interfaces(ifaces)
-    assert "Radmin: 26.0.0.8" in text
+    assert "Radmin VPN: 26.0.0.8" in text
     assert "Ethernet: 192.168.1.10" in text
+    assert "Tailscale: 100.64.1.2" in text
 
 
 @pytest.mark.parametrize(

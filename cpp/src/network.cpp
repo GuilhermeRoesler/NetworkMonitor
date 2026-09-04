@@ -40,6 +40,62 @@ bool is_private_ip(const std::string& ip) {
     return false;
 }
 
+bool is_tailscale_ip(const std::string& ip) {
+    unsigned a = 0, b = 0, c = 0, d = 0;
+    if (std::sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+        return false;
+    }
+    return a == 100 && b >= 64 && b <= 127;
+}
+
+std::string LocalInterface::id() const { return adapter_id(network_type, name); }
+
+std::string adapter_id(const std::string& network_type, const std::string& name) {
+    std::string slug;
+    slug.reserve(name.size());
+    bool pending_dash = false;
+    for (unsigned char ch : name) {
+        const char lower = static_cast<char>(::tolower(ch));
+        if ((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9')) {
+            if (pending_dash && !slug.empty()) {
+                slug.push_back('-');
+            }
+            slug.push_back(lower);
+            pending_dash = false;
+        } else {
+            pending_dash = true;
+        }
+    }
+    if (slug.empty()) {
+        slug = "adapter";
+    }
+    return network_type + ":" + slug;
+}
+
+bool default_adapter_enabled(const std::string& network_type) { return network_type == "lan"; }
+
+bool is_adapter_monitored(
+    const std::string& adapter_key,
+    const std::unordered_map<std::string, bool>& monitored_adapters,
+    const std::string& network_type) {
+    const auto it = monitored_adapters.find(adapter_key);
+    if (it != monitored_adapters.end()) {
+        return it->second;
+    }
+    std::string type = network_type;
+    if (type.empty()) {
+        const auto pos = adapter_key.find(':');
+        type = pos == std::string::npos ? "lan" : adapter_key.substr(0, pos);
+    }
+    return default_adapter_enabled(type.empty() ? "lan" : type);
+}
+
+bool is_adapter_monitored(
+    const LocalInterface& iface,
+    const std::unordered_map<std::string, bool>& monitored_adapters) {
+    return is_adapter_monitored(iface.id(), monitored_adapters, iface.network_type);
+}
+
 namespace {
 
 std::string dword_to_ip(DWORD value) {
@@ -116,13 +172,34 @@ std::string run_ipconfig() {
     return output;
 }
 
-bool should_skip_adapter(const std::string& name) {
-    std::string lower = name;
-    for (char& c : lower) {
+std::string to_lower(std::string value) {
+    for (char& c : value) {
         c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
     }
-    if (lower.find("radmin") != std::string::npos) {
-        return false;
+    return value;
+}
+
+bool has_word_wg(const std::string& lower) {
+    for (size_t i = 0; i + 1 < lower.size(); ++i) {
+        if (lower[i] != 'w' || lower[i + 1] != 'g') {
+            continue;
+        }
+        const bool left_ok = i == 0 || !std::isalnum(static_cast<unsigned char>(lower[i - 1]));
+        const bool right_ok = i + 2 >= lower.size() || !std::isalnum(static_cast<unsigned char>(lower[i + 2]));
+        if (left_ok && right_ok) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool should_skip_adapter(const std::string& name) {
+    const std::string lower = to_lower(name);
+    const char* keep[] = {"radmin", "tailscale", "wireguard"};
+    for (const char* token : keep) {
+        if (lower.find(token) != std::string::npos) {
+            return false;
+        }
     }
     const char* skips[] = {"loopback", "vethernet", "vmware", "hyper-v", "virtualbox", "virtual"};
     for (const char* token : skips) {
@@ -131,6 +208,39 @@ bool should_skip_adapter(const std::string& name) {
         }
     }
     return false;
+}
+
+std::optional<std::string> classify_adapter(const std::string& name, const std::string& ip) {
+    const std::string lower = to_lower(name);
+    if (is_radmin_ip(ip) || lower.find("radmin") != std::string::npos) {
+        return std::string("radmin");
+    }
+    if (is_tailscale_ip(ip) || lower.find("tailscale") != std::string::npos) {
+        return std::string("tailscale");
+    }
+    if (lower.find("wireguard") != std::string::npos || has_word_wg(lower) || lower.rfind("wg-", 0) == 0) {
+        return std::string("wireguard");
+    }
+    if (is_private_ip(ip)) {
+        return std::string("lan");
+    }
+    return std::nullopt;
+}
+
+std::string network_type_label(const std::string& network_type) {
+    if (network_type == "radmin") {
+        return "Radmin VPN";
+    }
+    if (network_type == "tailscale") {
+        return "Tailscale";
+    }
+    if (network_type == "wireguard") {
+        return "WireGuard";
+    }
+    if (network_type == "lan") {
+        return "Rede local";
+    }
+    return network_type;
 }
 
 std::optional<std::string> lan_from_udp() {
@@ -178,6 +288,19 @@ std::string u32_to_ip(unsigned value) {
     return oss.str();
 }
 
+std::vector<std::string> get_ips_of_type(const std::string& network_type) {
+    std::vector<std::string> ips;
+    std::set<std::string> seen;
+    for (const auto& iface : list_local_interfaces()) {
+        if (iface.network_type != network_type || seen.count(iface.ip)) {
+            continue;
+        }
+        seen.insert(iface.ip);
+        ips.push_back(iface.ip);
+    }
+    return ips;
+}
+
 }  // namespace
 
 std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text) {
@@ -209,21 +332,15 @@ std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text) {
             continue;
         }
 
-        std::string adapter_lower = current_adapter;
-        for (char& c : adapter_lower) {
-            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        const auto network_type = classify_adapter(current_adapter, candidate);
+        if (!network_type) {
+            continue;
         }
 
         LocalInterface iface;
         iface.name = current_adapter;
         iface.ip = candidate;
-        if (is_radmin_ip(candidate) || adapter_lower.find("radmin") != std::string::npos) {
-            iface.network_type = "radmin";
-        } else if (is_private_ip(candidate)) {
-            iface.network_type = "lan";
-        } else {
-            continue;
-        }
+        iface.network_type = *network_type;
         seen_ips.insert(candidate);
         results.push_back(std::move(iface));
     }
@@ -295,10 +412,7 @@ std::vector<std::string> get_local_ips(const std::string& network_type) {
     if (network_type == "lan") {
         return get_lan_ips();
     }
-    if (auto radmin = get_radmin_ip()) {
-        return {*radmin};
-    }
-    return {};
+    return get_ips_of_type(network_type);
 }
 
 std::optional<std::string> get_local_ip(const std::string& network_type) {
@@ -307,6 +421,48 @@ std::optional<std::string> get_local_ip(const std::string& network_type) {
         return std::nullopt;
     }
     return ips.front();
+}
+
+std::vector<LocalInterface> get_monitored_interfaces(
+    const std::unordered_map<std::string, bool>& monitored_adapters) {
+    std::vector<LocalInterface> result;
+    for (const auto& iface : list_local_interfaces()) {
+        if (is_adapter_monitored(iface, monitored_adapters)) {
+            result.push_back(iface);
+        }
+    }
+    return result;
+}
+
+std::vector<std::string> get_monitored_ips(
+    const std::string& network_type,
+    const std::unordered_map<std::string, bool>& monitored_adapters) {
+    std::vector<std::string> ips;
+    std::set<std::string> seen;
+    for (const auto& iface : list_local_interfaces()) {
+        if (iface.network_type != network_type) {
+            continue;
+        }
+        if (!is_adapter_monitored(iface, monitored_adapters)) {
+            continue;
+        }
+        if (seen.count(iface.ip)) {
+            continue;
+        }
+        seen.insert(iface.ip);
+        ips.push_back(iface.ip);
+    }
+
+    if (network_type == "lan") {
+        if (auto preferred = lan_from_udp()) {
+            auto it = std::find(ips.begin(), ips.end(), *preferred);
+            if (it != ips.end()) {
+                ips.erase(it);
+                ips.insert(ips.begin(), *preferred);
+            }
+        }
+    }
+    return ips;
 }
 
 std::string format_local_interfaces(const std::vector<LocalInterface>& interfaces) {
@@ -319,7 +475,8 @@ std::string format_local_interfaces(const std::vector<LocalInterface>& interface
             oss << " · ";
         }
         const auto& iface = interfaces[i];
-        const std::string label = iface.network_type == "radmin" ? "Radmin" : iface.name;
+        const std::string label =
+            iface.network_type == "lan" ? iface.name : network_type_label(iface.network_type);
         oss << label << ": " << iface.ip;
     }
     return oss.str();

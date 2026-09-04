@@ -101,7 +101,14 @@ def resolve_ui_dir() -> Path:
 def build_snapshot(*, show_hidden: bool) -> dict:
     from nm.config import load_config
     from nm.identity import get_peer_runtime
-    from nm.network import format_local_interfaces, get_lan_ip, get_lan_ips, get_radmin_ip
+    from nm.network import (
+        adapters_snapshot,
+        format_local_interfaces,
+        get_lan_ip,
+        get_lan_ips,
+        get_monitored_interfaces,
+        get_radmin_ip,
+    )
     from nm.state import load_state
 
     radmin_ip = get_radmin_ip()
@@ -110,9 +117,14 @@ def build_snapshot(*, show_hidden: bool) -> dict:
     config = load_config()
     state = load_state()
     display_peers = config.all_peers if show_hidden else config.peers
-
-    local_ips = format_local_interfaces()
-
+    adapters = adapters_snapshot(config.monitored_adapters)
+    monitored = get_monitored_interfaces(config.monitored_adapters)
+    if monitored:
+        local_ips = format_local_interfaces(monitored)
+    elif adapters:
+        local_ips = "Nenhuma rede monitorada"
+    else:
+        local_ips = "Nenhuma rede detectada"
 
     peers: list[dict] = []
     online_count = 0
@@ -152,6 +164,7 @@ def build_snapshot(*, show_hidden: bool) -> dict:
         "lan_ip": lan_ip,
         "lan_ips": lan_ips,
         "local_ips": local_ips,
+        "adapters": adapters,
         "interval_seconds": config.interval_seconds,
         "notifications_enabled": config.notifications_enabled,
         "history_retention_days": config.history_retention_days,
@@ -182,6 +195,11 @@ class GuiApi:
 
         set_notifications_enabled(bool(enabled))
         return True
+
+    def set_adapter_monitored(self, adapter_id: str, enabled: bool) -> bool:
+        from nm.config import set_adapter_monitored
+
+        return bool(set_adapter_monitored(str(adapter_id), bool(enabled)))
 
     def set_history_retention(self, days: int) -> int:
         from nm.config import set_history_retention_days

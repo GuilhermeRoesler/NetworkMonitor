@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Network Monitor
 
-App Windows (Python + C++) que monitora peers Radmin VPN e LAN via ping.
+App Windows (Python + C++) que monitora peers em rede local e VPNs opcionais via ping.
 
 Antes de implementar: leia **`.cursor/skills/project/SKILL.md`**, depois a skill da área.
 

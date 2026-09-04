@@ -12,7 +12,7 @@ class Peer:
     ip: str
     name: str
     network_name: str = ""
-    network_type: str = "radmin"
+    network_type: str = "lan"
     hidden: bool = False
     muted: bool = False
     online: bool | None = None
@@ -35,6 +35,7 @@ class MonitorConfig:
     notifications_enabled: bool = True
     history_retention_days: int = HISTORY_RETENTION_DEFAULT
     peer_order: list[str] = field(default_factory=list)
+    monitored_adapters: dict[str, bool] = field(default_factory=dict)
     networks: list[NetworkConfig] = field(default_factory=list)
 
     @property

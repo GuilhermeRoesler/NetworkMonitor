@@ -3,6 +3,7 @@
 #include "network.hpp"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 void test_is_radmin_ip() {
@@ -20,6 +21,25 @@ void test_is_private_ip() {
     NM_CHECK(!nm::is_private_ip("8.8.8.8"));
     NM_CHECK(!nm::is_private_ip("169.254.1.1"));
     NM_CHECK(!nm::is_private_ip("not-an-ip"));
+}
+
+void test_is_tailscale_ip() {
+    NM_CHECK(nm::is_tailscale_ip("100.64.0.1"));
+    NM_CHECK(nm::is_tailscale_ip("100.127.255.255"));
+    NM_CHECK(!nm::is_tailscale_ip("100.63.0.1"));
+    NM_CHECK(!nm::is_tailscale_ip("192.168.1.1"));
+}
+
+void test_adapter_id_and_default_enabled() {
+    NM_CHECK_EQ(nm::adapter_id("lan", "Ethernet"), std::string("lan:ethernet"));
+    NM_CHECK(nm::default_adapter_enabled("lan"));
+    NM_CHECK(!nm::default_adapter_enabled("tailscale"));
+
+    const nm::LocalInterface tailscale{"Tailscale", "100.64.1.2", "tailscale"};
+    const nm::LocalInterface ethernet{"Ethernet", "192.168.1.10", "lan"};
+    NM_CHECK(!nm::is_adapter_monitored(tailscale, {}));
+    NM_CHECK(nm::is_adapter_monitored(ethernet, {}));
+    NM_CHECK(nm::is_adapter_monitored(tailscale, {{"tailscale:tailscale", true}}));
 }
 
 void test_subnet_prefix_24() {
@@ -51,6 +71,14 @@ void test_parse_ipconfig_interfaces() {
         "\n"
         "   IPv4 Address. . . . . . . . . . . : 26.0.0.8\n"
         "\n"
+        "Ethernet adapter Tailscale:\n"
+        "\n"
+        "   IPv4 Address. . . . . . . . . . . : 100.64.1.20\n"
+        "\n"
+        "Ethernet adapter WireGuard Tunnel:\n"
+        "\n"
+        "   IPv4 Address. . . . . . . . . . . : 10.8.0.2\n"
+        "\n"
         "Ethernet adapter vEthernet (Default Switch):\n"
         "\n"
         "   IPv4 Address. . . . . . . . . . . : 172.20.80.1\n"
@@ -60,13 +88,17 @@ void test_parse_ipconfig_interfaces() {
         "   IPv4 Address. . . . . . . . . . . : 169.254.12.34\n";
 
     const auto ifaces = nm::parse_ipconfig_interfaces(output);
-    NM_CHECK(ifaces.size() == 3);
+    NM_CHECK(ifaces.size() == 5);
     NM_CHECK(ifaces[0].ip == "192.168.1.10");
     NM_CHECK(ifaces[0].network_type == "lan");
     NM_CHECK(ifaces[1].ip == "10.0.0.5");
     NM_CHECK(ifaces[1].network_type == "lan");
     NM_CHECK(ifaces[2].ip == "26.0.0.8");
     NM_CHECK(ifaces[2].network_type == "radmin");
+    NM_CHECK(ifaces[3].ip == "100.64.1.20");
+    NM_CHECK(ifaces[3].network_type == "tailscale");
+    NM_CHECK(ifaces[4].ip == "10.8.0.2");
+    NM_CHECK(ifaces[4].network_type == "wireguard");
 }
 
 void test_unique_scan_ips() {
@@ -81,15 +113,19 @@ void test_format_local_interfaces() {
     const std::vector<nm::LocalInterface> ifaces{
         {"Radmin VPN", "26.0.0.8", "radmin"},
         {"Ethernet", "192.168.1.10", "lan"},
+        {"Tailscale", "100.64.1.2", "tailscale"},
     };
     const std::string text = nm::format_local_interfaces(ifaces);
-    NM_CHECK(text.find("Radmin: 26.0.0.8") != std::string::npos);
+    NM_CHECK(text.find("Radmin VPN: 26.0.0.8") != std::string::npos);
     NM_CHECK(text.find("Ethernet: 192.168.1.10") != std::string::npos);
+    NM_CHECK(text.find("Tailscale: 100.64.1.2") != std::string::npos);
 }
 
 void run_network_tests() {
     test_is_radmin_ip();
     test_is_private_ip();
+    test_is_tailscale_ip();
+    test_adapter_id_and_default_enabled();
     test_subnet_prefix_24();
     test_skip_ips_for_network();
     test_parse_ipconfig_interfaces();

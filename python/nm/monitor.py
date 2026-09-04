@@ -13,7 +13,7 @@ from nm.identity import enrich_online_peers, record_peer_ping
 from nm.models import MonitorConfig, NetworkConfig, Peer
 from nm.network import (
     format_local_interfaces,
-    get_local_ips,
+    get_monitored_ips,
     list_local_interfaces,
     skip_ips_for_network,
     subnet_for_ip,
@@ -113,12 +113,14 @@ def process_network(
     if not network.enabled:
         return [], last_scan, False
 
-    local_ips = get_local_ips(network.network_type)
-    if not local_ips:
-        logging.warning("Rede '%s' (%s) não detectada.", network.name, network.network_type)
-        return [], last_scan, False
-
+    local_ips = get_monitored_ips(network.network_type, config.monitored_adapters)
     peers = list(network.peers)
+    if not local_ips:
+        logging.warning(
+            "Rede '%s' (%s) sem adaptador monitorado detectado.", network.name, network.network_type
+        )
+        return peers, last_scan, False
+
     known_ips = known_global_ips | set(local_ips)
     config_changed = False
     scan_ips = unique_scan_ips(local_ips)

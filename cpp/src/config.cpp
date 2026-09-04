@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include "network.hpp"
 #include "paths.hpp"
 
 #include <nlohmann_json.hpp>
@@ -17,6 +18,111 @@ namespace nm {
 namespace {
 
 using json = nlohmann::json;
+
+const char* default_network_name(const std::string& network_type) {
+    if (network_type == "radmin") {
+        return "Radmin VPN";
+    }
+    if (network_type == "tailscale") {
+        return "Tailscale";
+    }
+    if (network_type == "wireguard") {
+        return "WireGuard";
+    }
+    return "Rede local";
+}
+
+std::unordered_map<std::string, bool> parse_monitored_adapters(const json& raw) {
+    std::unordered_map<std::string, bool> monitored;
+    if (!raw.contains("monitored_adapters") || !raw["monitored_adapters"].is_object()) {
+        return monitored;
+    }
+    for (auto it = raw["monitored_adapters"].begin(); it != raw["monitored_adapters"].end(); ++it) {
+        if (it.value().is_boolean()) {
+            monitored[it.key()] = it.value().get<bool>();
+        }
+    }
+    return monitored;
+}
+
+std::set<std::string> enabled_network_types(const json& raw) {
+    std::set<std::string> types;
+    for (const auto& network : raw.value("networks", json::array())) {
+        if (network.value("enabled", true)) {
+            types.insert(network.value("type", "lan"));
+        }
+    }
+    return types;
+}
+
+std::unordered_map<std::string, bool> ensure_monitored_adapters(json& raw) {
+    const auto interfaces = list_local_interfaces();
+    const bool migrating = !raw.contains("monitored_adapters");
+    auto monitored = migrating ? std::unordered_map<std::string, bool>{} : parse_monitored_adapters(raw);
+    const auto legacy_types = migrating ? enabled_network_types(raw) : std::set<std::string>{};
+    bool changed = migrating;
+
+    for (const auto& iface : interfaces) {
+        const std::string key = iface.id();
+        if (monitored.count(key)) {
+            continue;
+        }
+        const bool enabled =
+            migrating ? legacy_types.count(iface.network_type) > 0 : default_adapter_enabled(iface.network_type);
+        monitored[key] = enabled;
+        changed = true;
+    }
+
+    if (changed) {
+        raw["monitored_adapters"] = monitored;
+    } else if (!raw.contains("monitored_adapters")) {
+        raw["monitored_adapters"] = monitored;
+    }
+    return monitored;
+}
+
+json& ensure_network_bucket(json& raw, const std::string& network_type) {
+    auto& networks = raw["networks"];
+    if (!networks.is_array()) {
+        networks = json::array();
+    }
+    for (auto& network : networks) {
+        if (network.value("type", "") == network_type) {
+            return network;
+        }
+    }
+    networks.push_back(json{{"name", default_network_name(network_type)},
+                            {"type", network_type},
+                            {"enabled", false},
+                            {"auto_discover", true},
+                            {"peers", json::array()}});
+    return networks.back();
+}
+
+void sync_network_enabled_for_type(json& raw, const std::string& network_type) {
+    const auto monitored = parse_monitored_adapters(raw);
+    bool any_enabled = false;
+    for (const auto& [key, enabled] : monitored) {
+        if (!enabled) {
+            continue;
+        }
+        const auto pos = key.find(':');
+        const std::string key_type = pos == std::string::npos ? "lan" : key.substr(0, pos);
+        if (key_type == network_type) {
+            any_enabled = true;
+            break;
+        }
+    }
+    if (!any_enabled) {
+        for (const auto& iface : list_local_interfaces()) {
+            if (iface.network_type == network_type && is_adapter_monitored(iface, monitored)) {
+                any_enabled = true;
+                break;
+            }
+        }
+    }
+    ensure_network_bucket(raw, network_type)["enabled"] = any_enabled;
+}
 
 std::vector<std::string> collect_peer_ips(const json& raw) {
     std::vector<std::string> ips;
@@ -195,18 +301,13 @@ void save_default_config() {
         {"scan_interval_seconds", 300},
         {"notifications_enabled", true},
         {"history_retention_days", kHistoryRetentionDefault},
+        {"monitored_adapters", json::object()},
         {"networks",
-         json::array(
-             {json{{"name", "Radmin VPN"},
-                   {"type", "radmin"},
-                   {"enabled", true},
-                   {"auto_discover", true},
-                   {"peers", json::array()}},
-              json{{"name", "Rede Local (LAN)"},
-                   {"type", "lan"},
-                   {"enabled", true},
-                   {"auto_discover", true},
-                   {"peers", json::array()}}})},
+         json::array({json{{"name", "Rede local"},
+                           {"type", "lan"},
+                           {"enabled", true},
+                           {"auto_discover", true},
+                           {"peers", json::array()}}})},
     };
     write_json(config_path(), raw);
 }
@@ -219,7 +320,10 @@ MonitorConfig load_config() {
 
     json raw = read_json(path);
     const auto original_order = raw.value("peer_order", json::array());
+    const json original_monitored =
+        raw.contains("monitored_adapters") ? raw["monitored_adapters"] : json();
     const bool global_auto = raw.value("auto_discover", true);
+    const auto monitored_adapters = ensure_monitored_adapters(raw);
 
     MonitorConfig config;
     config.interval_seconds = raw.value("interval_seconds", 15);
@@ -228,11 +332,12 @@ MonitorConfig load_config() {
     config.notifications_enabled = raw.value("notifications_enabled", true);
     config.history_retention_days =
         clamp_history_retention_days(raw.value("history_retention_days", kHistoryRetentionDefault));
+    config.monitored_adapters = monitored_adapters;
 
     for (const auto& network : raw.value("networks", json::array())) {
         NetworkConfig net;
         net.name = network.value("name", "Rede");
-        net.network_type = network.value("type", "radmin");
+        net.network_type = network.value("type", "lan");
         net.enabled = network.value("enabled", true);
         if (network.contains("auto_discover") && !network["auto_discover"].is_null()) {
             net.auto_discover = network.value("auto_discover", global_auto);
@@ -258,7 +363,8 @@ MonitorConfig load_config() {
     }
 
     config.peer_order = normalize_peer_order(raw);
-    if (raw.value("peer_order", json::array()) != original_order) {
+    const bool adapters_changed = raw.value("monitored_adapters", json()) != original_monitored;
+    if (raw.value("peer_order", json::array()) != original_order || adapters_changed) {
         write_json(path, raw);
     }
     return config;
@@ -584,6 +690,34 @@ bool set_peer_muted(const std::string& ip, bool muted) {
 void set_notifications_enabled(bool enabled) {
     json raw = load_raw_config();
     raw["notifications_enabled"] = enabled;
+    save_raw_config(raw);
+}
+
+bool set_adapter_monitored(const std::string& adapter_key, bool enabled) {
+    const std::string key = adapter_key;
+    const auto colon = key.find(':');
+    if (key.empty() || colon == std::string::npos || colon == 0) {
+        return false;
+    }
+    const std::string network_type = key.substr(0, colon);
+
+    json raw = load_raw_config();
+    auto monitored = ensure_monitored_adapters(raw);
+    monitored[key] = enabled;
+    raw["monitored_adapters"] = monitored;
+    sync_network_enabled_for_type(raw, network_type);
+    save_raw_config(raw);
+    return true;
+}
+
+void ensure_network_type_enabled(const std::string& network_type) {
+    if (network_type.empty()) {
+        return;
+    }
+    json raw = load_raw_config();
+    ensure_monitored_adapters(raw);
+    auto& bucket = ensure_network_bucket(raw, network_type);
+    bucket["enabled"] = true;
     save_raw_config(raw);
 }
 

@@ -8,14 +8,16 @@ import signal
 import sys
 import threading
 
-from nm.config import load_config, persist_discovered_peers
+from nm.config import ensure_network_bucket, load_config, persist_discovered_peers
 from nm.discover import discover_peers
 from nm.logging_setup import setup_logging
 from nm.monitor import run_monitor_loop
 from nm.network import (
+    NETWORK_TYPE_LABELS,
     get_lan_ips,
     get_local_ips,
-    get_radmin_ip,
+    get_monitored_ips,
+    is_adapter_monitored,
     list_local_interfaces,
     skip_ips_for_network,
     subnet_for_ip,
@@ -47,24 +49,49 @@ def run_console() -> None:
         logging.info("Monitor encerrado.")
 
 
-def scan_network(network_type: str) -> bool:
+def _network_label(network_type: str) -> str:
+    return NETWORK_TYPE_LABELS.get(network_type, network_type)
+
+
+def scan_network(network_type: str, *, monitored_only: bool = True) -> bool:
     setup_logging()
-    local_ips = get_local_ips(network_type)
-    label = "Radmin VPN" if network_type == "radmin" else "LAN"
+    config = load_config()
+    if monitored_only:
+        local_ips = get_monitored_ips(network_type, config.monitored_adapters)
+    else:
+        local_ips = get_local_ips(network_type)
+    label = _network_label(network_type)
 
     if not local_ips:
-        print(f"{label} não encontrada. Verifique a conexão.")
+        print(f"{label} não encontrada. Verifique a conexão ou os adaptadores monitorados.")
         return False
 
     scan_ips = unique_scan_ips(local_ips)
     print(f"IP(s) local(is) ({label}): {', '.join(local_ips)}")
     print(f"Escaneando sub-rede(s) {', '.join(str(subnet_for_ip(ip)) for ip in scan_ips)}...")
 
-    config = load_config()
     network = next(
         (n for n in config.networks if n.network_type == network_type and n.enabled),
         None,
     )
+    if network is None:
+        # Cria bucket se o usuário escaneou um tipo ainda sem rede no JSON.
+        import json
+
+        from nm import paths
+
+        with paths.CONFIG_PATH.open(encoding="utf-8") as handle:
+            raw = json.load(handle)
+        bucket = ensure_network_bucket(raw, network_type)
+        bucket["enabled"] = True
+        paths.CONFIG_PATH.write_text(
+            json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        config = load_config()
+        network = next(
+            (n for n in config.networks if n.network_type == network_type and n.enabled),
+            None,
+        )
     if network is None:
         print(f"Nenhuma rede do tipo '{network_type}' habilitada em peers.json.")
         return False
@@ -93,20 +120,42 @@ def scan_network(network_type: str) -> bool:
     return True
 
 
-def scan_once() -> None:
-    if not scan_network("radmin"):
+def scan_monitored() -> None:
+    config = load_config()
+    types = sorted(
+        {
+            iface.network_type
+            for iface in list_local_interfaces()
+            if is_adapter_monitored(iface, config.monitored_adapters)
+        }
+    )
+    if not types:
+        print("Nenhum adaptador monitorado detectado.")
+        sys.exit(1)
+    ok = False
+    for index, network_type in enumerate(types):
+        if index:
+            print()
+        if scan_network(network_type, monitored_only=True):
+            ok = True
+    if not ok:
         sys.exit(1)
 
 
 def scan_lan() -> None:
-    if not scan_network("lan"):
+    if not scan_network("lan", monitored_only=False):
         sys.exit(1)
 
 
 def scan_all() -> None:
-    scan_network("radmin")
-    print()
-    scan_network("lan")
+    types = sorted({iface.network_type for iface in list_local_interfaces()})
+    if not types:
+        print("Nenhuma interface detectada.")
+        sys.exit(1)
+    for index, network_type in enumerate(types):
+        if index:
+            print()
+        scan_network(network_type, monitored_only=False)
 
 
 def show_status() -> None:
@@ -115,12 +164,12 @@ def show_status() -> None:
     state = load_state()
 
     if interfaces:
-        print("Interfaces:")
+        print("Adaptadores:")
         for iface in interfaces:
-            print(f"  [{iface.network_type}] {iface.name}: {iface.ip}")
+            flag = "on" if is_adapter_monitored(iface, config.monitored_adapters) else "off"
+            print(f"  [{flag}] [{iface.network_type}] {iface.name}: {iface.ip}")
     else:
-        print("Interfaces: nenhuma detectada")
-    print(f"IP Radmin: {get_radmin_ip() or 'não detectado'}")
+        print("Adaptadores: nenhum detectado")
     lan_ips = get_lan_ips()
     print(f"IP(s) LAN: {', '.join(lan_ips) if lan_ips else 'não detectado'}")
     print(f"Peers visíveis: {len(config.peers)}")
@@ -160,7 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--uninstall", action="store_true", help="Remove o atalho da pasta Startup do Windows"
     )
-    parser.add_argument("--scan", action="store_true", help="Escaneia a sub-rede Radmin uma vez")
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Escaneia os adaptadores monitorados uma vez",
+    )
     parser.add_argument(
         "--scan-lan",
         action="store_true",
@@ -169,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scan-all",
         action="store_true",
-        help="Escaneia Radmin e todas as interfaces LAN",
+        help="Escaneia todos os adaptadores detectados (LAN e VPNs)",
     )
     parser.add_argument("--status", action="store_true", help="Mostra status atual")
     parser.add_argument("--gui", action="store_true", help="Abre apenas o painel gráfico")
@@ -191,7 +244,7 @@ def main() -> None:
         return
 
     if args.scan:
-        scan_once()
+        scan_monitored()
         return
 
     if args.scan_lan:

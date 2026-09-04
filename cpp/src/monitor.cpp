@@ -22,6 +22,22 @@ void emit_log(MonitorEventSink* sink, const std::string& message) {
     }
 }
 
+std::string network_label(const std::string& network_type) {
+    if (network_type == "radmin") {
+        return "Radmin VPN";
+    }
+    if (network_type == "tailscale") {
+        return "Tailscale";
+    }
+    if (network_type == "wireguard") {
+        return "WireGuard";
+    }
+    if (network_type == "lan") {
+        return "Rede local";
+    }
+    return network_type;
+}
+
 }  // namespace
 
 StateMap check_peers(
@@ -112,9 +128,14 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
             if (!network.enabled) {
                 continue;
             }
-            const auto local_ips = get_local_ips(network.network_type);
+            const auto local_ips = get_monitored_ips(network.network_type, config.monitored_adapters);
             if (local_ips.empty()) {
-                emit_log(sink, "Rede '" + network.name + "' (" + network.network_type + ") não detectada.");
+                emit_log(sink, "Rede '" + network.name + "' (" + network.network_type +
+                                   ") sem adaptador monitorado detectado.");
+                for (const auto& peer : network.peers) {
+                    known_global.insert(peer.ip);
+                    all_peers.push_back(peer);
+                }
                 continue;
             }
 
@@ -176,7 +197,8 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
         const auto radmin = get_radmin_ip();
         const auto lan = get_lan_ip();
         const auto lan_ips = get_lan_ips();
-        const std::string local_label = format_local_interfaces();
+        const auto monitored_ifaces = get_monitored_interfaces(config.monitored_adapters);
+        const std::string local_label = format_local_interfaces(monitored_ifaces);
         if (visible.empty()) {
             emit_log(sink, "Nenhum peer configurado ou encontrado. Aguardando...");
         } else {
@@ -227,11 +249,17 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
     emit_log(sink, "Monitor encerrado.");
 }
 
-bool scan_network(const std::string& network_type) {
-    const auto local_ips = get_local_ips(network_type);
-    const std::string label = network_type == "radmin" ? "Radmin VPN" : "LAN";
+bool scan_network(const std::string& network_type, bool monitored_only) {
+    MonitorConfig config = load_config();
+    std::vector<std::string> local_ips;
+    if (monitored_only) {
+        local_ips = get_monitored_ips(network_type, config.monitored_adapters);
+    } else {
+        local_ips = get_local_ips(network_type);
+    }
+    const std::string label = network_label(network_type);
     if (local_ips.empty()) {
-        std::cout << label << " não encontrada. Verifique a conexão.\n";
+        std::cout << label << " não encontrada. Verifique a conexão ou os adaptadores monitorados.\n";
         return false;
     }
 
@@ -252,12 +280,21 @@ bool scan_network(const std::string& network_type) {
     }
     std::cout << "...\n";
 
-    MonitorConfig config = load_config();
     const NetworkConfig* network = nullptr;
     for (const auto& candidate : config.networks) {
         if (candidate.network_type == network_type && candidate.enabled) {
             network = &candidate;
             break;
+        }
+    }
+    if (!network) {
+        ensure_network_type_enabled(network_type);
+        config = load_config();
+        for (const auto& candidate : config.networks) {
+            if (candidate.network_type == network_type && candidate.enabled) {
+                network = &candidate;
+                break;
+            }
         }
     }
     if (!network) {
@@ -296,22 +333,68 @@ bool scan_network(const std::string& network_type) {
     return true;
 }
 
+bool scan_monitored() {
+    const MonitorConfig config = load_config();
+    std::set<std::string> types;
+    for (const auto& iface : list_local_interfaces()) {
+        if (is_adapter_monitored(iface, config.monitored_adapters)) {
+            types.insert(iface.network_type);
+        }
+    }
+    if (types.empty()) {
+        std::cout << "Nenhum adaptador monitorado detectado.\n";
+        return false;
+    }
+    bool ok = false;
+    bool first = true;
+    for (const auto& network_type : types) {
+        if (!first) {
+            std::cout << "\n";
+        }
+        first = false;
+        if (scan_network(network_type, true)) {
+            ok = true;
+        }
+    }
+    return ok;
+}
+
+bool scan_all_detected() {
+    std::set<std::string> types;
+    for (const auto& iface : list_local_interfaces()) {
+        types.insert(iface.network_type);
+    }
+    if (types.empty()) {
+        std::cout << "Nenhuma interface detectada.\n";
+        return false;
+    }
+    bool first = true;
+    for (const auto& network_type : types) {
+        if (!first) {
+            std::cout << "\n";
+        }
+        first = false;
+        scan_network(network_type, false);
+    }
+    return true;
+}
+
 void show_status() {
     const auto interfaces = list_local_interfaces();
-    const auto radmin = get_radmin_ip();
     const auto lan_ips = get_lan_ips();
     const MonitorConfig config = load_config();
     const StateMap state = load_state();
 
     if (!interfaces.empty()) {
-        std::cout << "Interfaces:\n";
+        std::cout << "Adaptadores:\n";
         for (const auto& iface : interfaces) {
-            std::cout << "  [" << iface.network_type << "] " << iface.name << ": " << iface.ip << "\n";
+            const char* flag = is_adapter_monitored(iface, config.monitored_adapters) ? "on" : "off";
+            std::cout << "  [" << flag << "] [" << iface.network_type << "] " << iface.name << ": " << iface.ip
+                      << "\n";
         }
     } else {
-        std::cout << "Interfaces: nenhuma detectada\n";
+        std::cout << "Adaptadores: nenhum detectado\n";
     }
-    std::cout << "IP Radmin: " << (radmin ? *radmin : "não detectado") << "\n";
     std::cout << "IP(s) LAN: ";
     if (lan_ips.empty()) {
         std::cout << "não detectado";

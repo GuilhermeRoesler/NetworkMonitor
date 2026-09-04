@@ -46,7 +46,9 @@ StateMap check_peers(
     MonitorEventSink* sink = nullptr,
     const std::atomic_bool* stop = nullptr);
 void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink = nullptr);
-bool scan_network(const std::string& network_type);
+bool scan_network(const std::string& network_type, bool monitored_only = true);
+bool scan_monitored();
+bool scan_all_detected();
 void show_status();
 
 }  // namespace nm

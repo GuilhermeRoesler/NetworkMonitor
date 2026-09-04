@@ -17,11 +17,19 @@ def test_save_default_config_creates_peers_json(tmp_app_dir: Path) -> None:
     assert raw["interval_seconds"] == 15
     assert raw["notifications_enabled"] is True
     assert raw["history_retention_days"] == 7
+    assert "monitored_adapters" in raw
     types = {n["type"] for n in raw["networks"]}
-    assert types == {"radmin", "lan"}
+    assert types == {"lan"}
 
 
-def test_load_config_reads_sample(write_sample_config: Path) -> None:
+def test_load_config_reads_sample(write_sample_config: Path, monkeypatch) -> None:
+    from nm import network
+
+    fake = [
+        network.LocalInterface("Ethernet", "192.168.1.1", "lan"),
+        network.LocalInterface("Radmin VPN", "26.0.0.1", "radmin"),
+    ]
+    monkeypatch.setattr(config, "list_local_interfaces", lambda: fake)
     loaded = config.load_config()
     assert loaded.interval_seconds == 15
     assert loaded.notifications_enabled is True
@@ -32,12 +40,16 @@ def test_load_config_reads_sample(write_sample_config: Path) -> None:
     assert "26.0.0.2" in visible_ips
     assert any(p.muted for p in loaded.all_peers if p.ip == "26.0.0.2")
     assert write_sample_config.exists()
+    assert loaded.monitored_adapters.get("lan:ethernet") is True
+    assert loaded.monitored_adapters.get("radmin:radmin-vpn") is True
 
 
-def test_load_config_creates_default_when_missing(tmp_app_dir: Path) -> None:
+def test_load_config_creates_default_when_missing(tmp_app_dir: Path, monkeypatch) -> None:
+    monkeypatch.setattr(config, "list_local_interfaces", lambda: [])
     loaded = config.load_config()
     assert (tmp_app_dir / "peers.json").exists()
-    assert len(loaded.networks) == 2
+    assert len(loaded.networks) == 1
+    assert loaded.networks[0].network_type == "lan"
 
 
 def test_save_and_load_state(tmp_app_dir: Path) -> None:
@@ -88,6 +100,25 @@ def test_set_notifications_enabled(write_sample_config: Path) -> None:
     assert config.notifications_enabled() is False
     raw = json.loads(write_sample_config.read_text(encoding="utf-8"))
     assert raw["notifications_enabled"] is False
+
+
+def test_set_adapter_monitored(tmp_app_dir: Path, monkeypatch) -> None:
+    from nm import network
+
+    fake = [
+        network.LocalInterface("Ethernet", "192.168.1.10", "lan"),
+        network.LocalInterface("Tailscale", "100.64.1.2", "tailscale"),
+    ]
+    monkeypatch.setattr(config, "list_local_interfaces", lambda: fake)
+    config.save_default_config()
+    assert config.set_adapter_monitored("tailscale:tailscale", True) is True
+    loaded = config.load_config()
+    assert loaded.monitored_adapters["tailscale:tailscale"] is True
+    assert any(n.network_type == "tailscale" and n.enabled for n in loaded.networks)
+    assert config.set_adapter_monitored("tailscale:tailscale", False) is True
+    loaded = config.load_config()
+    assert loaded.monitored_adapters["tailscale:tailscale"] is False
+    assert any(n.network_type == "tailscale" and not n.enabled for n in loaded.networks)
 
 
 def test_monitor_config_properties(write_sample_config: Path) -> None:

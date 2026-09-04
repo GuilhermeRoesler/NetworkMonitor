@@ -63,10 +63,11 @@ Sem `--install`. Help em português.
 
 ## Paridade com Python
 
-- Mesmos defaults e campos JSON (ver skill `config-schema`)
-- Mesmas regras Radmin (`26.*`, gateway `26.0.0.1`) e LAN (RFC1918, skip APIPA/virtuais; **todas** as interfaces LAN via `list_local_interfaces` / `get_lan_ips`)
+- Mesmos defaults e campos JSON (ver skill `config-schema`), incl. `monitored_adapters`
+- Tipos: `lan` / `radmin` / `tailscale` / `wireguard`; default só LAN monitorada
+- Descoberta usa IPs dos adaptadores monitorados (`get_monitored_ips`)
 - Transições de estado equivalentes; toast nativo quando UI ativa
-- Painel: rename, ocultar/mostrar, mute, reorder (paridade com `python/gui.py`)
+- Painel: rename, ocultar/mostrar, mute, reorder (paridade com `python/gui.py`); seleção de adaptadores via `peers.json` / `set_adapter_monitored`
 
 Ao mudar schema ou regra de rede: atualizar **também** `python/nm/config.py` / `python/nm/network.py`.
 Ao mudar comportamento do painel: manter paridade com `python/gui.py`.

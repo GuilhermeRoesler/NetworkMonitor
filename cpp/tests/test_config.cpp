@@ -78,9 +78,9 @@ void test_save_default_and_load_config() {
     NM_CHECK_EQ(config.interval_seconds, 15);
     NM_CHECK(config.notifications_enabled);
     NM_CHECK_EQ(config.history_retention_days, 7);
-    NM_CHECK_EQ(config.networks.size(), static_cast<size_t>(2));
-    NM_CHECK_EQ(config.networks[0].network_type, std::string("radmin"));
-    NM_CHECK_EQ(config.networks[1].network_type, std::string("lan"));
+    NM_CHECK_EQ(config.networks.size(), static_cast<size_t>(1));
+    NM_CHECK_EQ(config.networks[0].network_type, std::string("lan"));
+    NM_CHECK_EQ(config.networks[0].name, std::string("Rede local"));
 }
 
 void test_history_round_trip_and_prune() {
@@ -161,17 +161,41 @@ void test_persist_discovered_peers() {
     TempAppDir tmp;
     nm::save_default_config();
 
-    std::vector<nm::Peer> discovered{make_peer("26.0.0.42", "Novo")};
-    nm::persist_discovered_peers("Radmin VPN", discovered);
+    std::vector<nm::Peer> discovered{make_peer("192.168.1.42", "Novo")};
+    nm::persist_discovered_peers("Rede local", discovered);
 
     const auto config = nm::load_config();
     bool found = false;
     for (const auto& peer : config.all_peers()) {
-        if (peer.ip == "26.0.0.42" && peer.name == "Novo") {
+        if (peer.ip == "192.168.1.42" && peer.name == "Novo") {
             found = true;
         }
     }
     NM_CHECK(found);
+}
+
+void test_set_adapter_monitored() {
+    TempAppDir tmp;
+    nm::save_default_config();
+    NM_CHECK(nm::set_adapter_monitored("tailscale:tailscale", true));
+    auto loaded = nm::load_config();
+    NM_CHECK(loaded.monitored_adapters.at("tailscale:tailscale"));
+    bool tailscale_enabled = false;
+    for (const auto& network : loaded.networks) {
+        if (network.network_type == "tailscale") {
+            tailscale_enabled = network.enabled;
+        }
+    }
+    NM_CHECK(tailscale_enabled);
+
+    NM_CHECK(nm::set_adapter_monitored("tailscale:tailscale", false));
+    loaded = nm::load_config();
+    NM_CHECK(!loaded.monitored_adapters.at("tailscale:tailscale"));
+    for (const auto& network : loaded.networks) {
+        if (network.network_type == "tailscale") {
+            NM_CHECK(!network.enabled);
+        }
+    }
 }
 
 void test_update_peer_actions() {
@@ -233,5 +257,6 @@ void run_config_tests() {
     test_history_round_trip_and_prune();
     test_load_sample_config_and_state();
     test_persist_discovered_peers();
+    test_set_adapter_monitored();
     test_update_peer_actions();
 }

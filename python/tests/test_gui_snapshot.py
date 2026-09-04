@@ -71,6 +71,7 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
         {
           "interval_seconds": 15,
           "notifications_enabled": true,
+          "monitored_adapters": {"lan:ethernet": true, "radmin:radmin-vpn": true},
           "networks": [
             {
               "name": "Radmin VPN",
@@ -86,20 +87,25 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     state_path.write_text('{"26.0.0.2": true}', encoding="utf-8")
     monkeypatch.setattr(paths, "CONFIG_PATH", config_path)
     monkeypatch.setattr(paths, "STATE_PATH", state_path)
+    monkeypatch.setattr(paths, "DATA_DIR", tmp_path)
+    fake_ifaces = [
+        network.LocalInterface("Ethernet", "192.168.0.5", "lan"),
+        network.LocalInterface("Radmin VPN", "26.0.0.10", "radmin"),
+    ]
     monkeypatch.setattr(network, "get_radmin_ip", lambda: "26.0.0.10")
     monkeypatch.setattr(network, "get_lan_ip", lambda: "192.168.0.5")
     monkeypatch.setattr(network, "get_lan_ips", lambda: ["192.168.0.5", "10.0.0.2"])
-    monkeypatch.setattr(
-        network,
-        "format_local_interfaces",
-        lambda: "Radmin: 26.0.0.10 · Ethernet: 192.168.0.5 · Wi-Fi: 10.0.0.2",
-    )
+    monkeypatch.setattr(network, "list_local_interfaces", lambda: fake_ifaces)
+    import nm.config as nm_config
+
+    monkeypatch.setattr(nm_config, "list_local_interfaces", lambda: fake_ifaces)
 
     snap = build_snapshot(show_hidden=False)
     assert snap["radmin_ip"] == "26.0.0.10"
     assert snap["lan_ip"] == "192.168.0.5"
     assert snap["lan_ips"] == ["192.168.0.5", "10.0.0.2"]
-    assert "Wi-Fi: 10.0.0.2" in snap["local_ips"]
+    assert "adapters" in snap
+    assert len(snap["adapters"]) == 2
     assert snap["interval_seconds"] == 15
     assert snap["notifications_enabled"] is True
     assert snap["history_retention_days"] == 7

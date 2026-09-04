@@ -1,6 +1,8 @@
 # Network Monitor
 
-Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos em todas as sub-redes `/24` das interfaces privadas detectadas (mais Radmin), notifica quando alguém fica online ou offline e registra histórico de presença.
+Monitor de peers em **rede local** e **VPNs opcionais** (Tailscale, WireGuard, etc.) no Windows. Faz ping periódico, descobre dispositivos nas sub-redes `/24` dos adaptadores que você marcar no painel, notifica quando alguém fica online ou offline e registra histórico de presença.
+
+Por padrão só a **rede local** é monitorada. No painel, a aba **Adaptadores** lista o que o Windows detectou (LAN + VPNs conhecidas) para você escolher.
 
 ## Demo do painel
 
@@ -52,15 +54,15 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | `.\python\run.bat --gui` | Monitor + painel (sem bandeja) |
 | `.\python\run.bat --run` | Monitor só no console |
 | `.\python\run.bat --status` | Status atual |
-| `.\python\run.bat --scan` | Escaneia sub-rede Radmin |
+| `.\python\run.bat --scan` | Escaneia os adaptadores monitorados |
 | `.\python\run.bat --scan-lan` | Escaneia todas as sub-redes LAN detectadas |
-| `.\python\run.bat --scan-all` | Escaneia Radmin e todas as interfaces LAN |
+| `.\python\run.bat --scan-all` | Escaneia todos os adaptadores detectados (LAN e VPNs) |
 | `.\python\run.bat --install` | Atalho na pasta Startup |
 | `.\python\run.bat --uninstall` | Remove o atalho Startup |
 | `.\cpp\run.bat` | Bandeja + monitor (C++ Win32, compila se preciso) |
 | `.\cpp\run.bat --gui` | Monitor + painel Win32 |
 | `.\cpp\run.bat --status` | Mesmo status via C++ |
-| `.\cpp\run.bat --scan-all` | Escaneia Radmin e LAN via C++ |
+| `.\cpp\run.bat --scan-all` | Escaneia todos os adaptadores detectados via C++ |
 
 ## O que cada versão faz
 
@@ -68,6 +70,7 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 |---------|--------|-----|
 | Ping / descoberta / loop | sim | sim |
 | `peers.json` / `state.json` / `history.json` | sim | sim |
+| Seleção de adaptadores | sim (painel) | sim (config; painel lista IPs monitorados) |
 | Toast / bandeja / painel | sim | sim |
 | Renomear / ocultar / silenciar / reorder | sim | sim |
 | Histórico de presença (retenção) | sim | sim |
@@ -86,7 +89,10 @@ Na primeira execução é gerado `peers.json`. Campos principais:
 - `notifications_enabled` — toasts globais
 - `history_retention_days` — retenção do histórico (padrão 7, entre 1 e 90)
 - `peer_order` — ordem de exibição dos IPs (visíveis antes dos ocultos)
-- `networks[]` — redes `radmin` e/ou `lan`, cada uma com `peers`
+- `monitored_adapters` — mapa `{ "lan:ethernet": true, "tailscale:tailscale": false }` (quais NICs escanear)
+- `networks[]` — buckets por tipo (`lan`, e VPNs quando ativadas), cada um com `peers`
+
+Tipos conhecidos: rede local (RFC1918), Tailscale (`100.64/10`), WireGuard (por nome do adaptador) e outras VPNs classificadas pelo app. Interfaces virtuais típicas (Hyper-V, etc.) e APIPA são ignoradas.
 
 Por peer: `hidden` (não monitora) e `muted` (monitora sem notificar).
 

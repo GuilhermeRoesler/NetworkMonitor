@@ -45,21 +45,24 @@ Dev: `python/requirements-dev.txt` (ruff, pytest)
 
 ## Detecção de IP
 
-| Tipo | Fonte | Regra |
-|------|-------|-------|
-| `radmin` | Registry `Famatech\RadminVPN\1.0` → `IPv4`, fallback `ipconfig` | `26.*` |
-| `lan` | `ipconfig` (todas as interfaces privadas) + preferência UDP `8.8.8.8` | RFC1918; exclui Radmin, APIPA e adaptadores virtuais |
+Tipos conhecidos: `lan` | `radmin` | `tailscale` | `wireguard`.
+
+| Tipo | Regra |
+|------|-------|
+| `radmin` | IP `26.*` ou nome do adaptador; registry Famatech como fallback |
+| `tailscale` | IP `100.64.0.0/10` ou nome contém tailscale |
+| `wireguard` | Nome contém wireguard / `wg` |
+| `lan` | RFC1918; exclui VPNs acima, APIPA e adaptadores virtuais |
 
 Constantes / helpers em `nm/network.py`:
 
 - `list_local_interfaces()` / `parse_ipconfig_interfaces()` — enumera adaptadores
-- `get_lan_ips()` — todos os IPs LAN; `get_lan_ip()` — principal
-- `unique_scan_ips()` — um representante por `/24` (evita scan duplicado)
-- `RADMIN_GATEWAYS = {"26.0.0.1"}` — skip no scan Radmin
-- `LAN_SKIP_PREFIXES = ("169.254.",)` / `ADAPTER_SKIP_TOKENS` (loopback, Hyper-V, VMware, …)
+- `monitored_adapters` em `peers.json` + `is_adapter_monitored` / `get_monitored_ips`
+- Default: só `lan` monitorado; VPNs opt-in no painel
+- `unique_scan_ips()` — um representante por `/24`
 - Sub-rede sempre `/24` (`subnet_for_ip`)
 
-Scan LAN / auto-discover: percorre **todas** as interfaces LAN detectadas (não só a rota padrão).
+Scan / auto-discover: percorre apenas adaptadores **monitorados** (exceto `--scan-lan` / `--scan-all`).
 
 ## Ciclo de monitor (`nm.monitor.run_monitor_loop`)
 
@@ -79,7 +82,7 @@ Ping: `ping -n 1 -w {ms}` com `CREATE_NO_WINDOW`; sucesso se saída contém `ttl
 | (nenhuma) | bandeja + monitor |
 | `--run` | só loop (sem tray) |
 | `--gui` | monitor + painel |
-| `--scan` / `--scan-lan` / `--scan-all` | scan único |
+| `--scan` / `--scan-lan` / `--scan-all` | scan monitorados / LAN / todos detectados |
 | `--status` | dump de status |
 | `--install` / `--uninstall` | atalho Startup |
 
@@ -99,13 +102,13 @@ Taskbar em dev: `ensure_win32_app_user_model_id()` (`Gui.NetworkMonitor`) no in�
 ## APIs usadas pela GUI
 
 Em `nm.config` / `nm.state` / `nm.history` / `nm.network` / `nm.identity`:  
-`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`, `get_lan_ips`, `list_local_interfaces`, `format_local_interfaces`, `get_peer_runtime`.
+`update_peer_name`, `set_peer_hidden`, `set_peer_muted`, `move_peer`, `move_peer_to_end`, `save_peer_order`, `set_notifications_enabled`, `set_history_retention_days`, `set_adapter_monitored`, `get_peer_history`, `load_config`, `load_state`, `get_radmin_ip`, `get_lan_ip`, `get_lan_ips`, `list_local_interfaces`, `adapters_snapshot`, `format_local_interfaces`, `get_peer_runtime`.
 
 ## Onde mudar
 
 | Pedido | Módulo |
 |--------|--------|
-| Novo tipo de rede | `nm/network.py`, `nm/config.py` (`save_default_config`) |
+| Novo tipo de rede / VPN | `nm/network.py`, `nm/config.py` (`save_default_config`, labels) |
 | Toast | `nm/notify.py`, `nm/monitor.py` |
 | Item de menu tray | `nm/tray.py` |
 | Flag CLI | `nm/cli.py` |

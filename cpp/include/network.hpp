@@ -6,6 +6,7 @@
 #include <atomic>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace nm {
@@ -13,11 +14,24 @@ namespace nm {
 struct LocalInterface {
     std::string name;
     std::string ip;
-    std::string network_type;  // "radmin" | "lan"
+    std::string network_type;  // lan | radmin | tailscale | wireguard
+
+    std::string id() const;
 };
 
 bool is_radmin_ip(const std::string& ip);
 bool is_private_ip(const std::string& ip);
+bool is_tailscale_ip(const std::string& ip);
+
+std::string adapter_id(const std::string& network_type, const std::string& name);
+bool default_adapter_enabled(const std::string& network_type);
+bool is_adapter_monitored(
+    const LocalInterface& iface,
+    const std::unordered_map<std::string, bool>& monitored_adapters);
+bool is_adapter_monitored(
+    const std::string& adapter_key,
+    const std::unordered_map<std::string, bool>& monitored_adapters,
+    const std::string& network_type = {});
 
 std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text);
 std::vector<LocalInterface> list_local_interfaces();
@@ -27,6 +41,12 @@ std::optional<std::string> get_lan_ip();
 std::vector<std::string> get_lan_ips();
 std::vector<std::string> get_local_ips(const std::string& network_type);
 std::optional<std::string> get_local_ip(const std::string& network_type);
+
+std::vector<LocalInterface> get_monitored_interfaces(
+    const std::unordered_map<std::string, bool>& monitored_adapters = {});
+std::vector<std::string> get_monitored_ips(
+    const std::string& network_type,
+    const std::unordered_map<std::string, bool>& monitored_adapters = {});
 
 std::string format_local_interfaces(const std::vector<LocalInterface>& interfaces);
 std::string format_local_interfaces();

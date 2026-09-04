@@ -1,4 +1,4 @@
-"""Detecção de IPs locais (Radmin VPN e interfaces LAN)."""
+"""Detecção de IPs locais (LAN e VPNs conhecidas)."""
 
 from __future__ import annotations
 
@@ -25,24 +25,78 @@ ADAPTER_SKIP_TOKENS = (
     "virtualbox",
     "virtual",
 )
+ADAPTER_KEEP_TOKENS = ("radmin", "tailscale", "wireguard")
 PRIVATE_NETWORKS = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
 )
+TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+KNOWN_NETWORK_TYPES = ("lan", "radmin", "tailscale", "wireguard")
+
+NETWORK_TYPE_LABELS = {
+    "lan": "Rede local",
+    "radmin": "Radmin VPN",
+    "tailscale": "Tailscale",
+    "wireguard": "WireGuard",
+}
+
+DEFAULT_NETWORK_NAMES = {
+    "lan": "Rede local",
+    "radmin": "Radmin VPN",
+    "tailscale": "Tailscale",
+    "wireguard": "WireGuard",
+}
 
 
 @dataclass(frozen=True)
 class LocalInterface:
-    """Adaptador local utilizável para scan (Radmin ou LAN privada)."""
+    """Adaptador local utilizável para scan (LAN ou VPN conhecida)."""
 
     name: str
     ip: str
-    network_type: str  # "radmin" | "lan"
+    network_type: str  # lan | radmin | tailscale | wireguard
+
+    @property
+    def id(self) -> str:
+        return adapter_id(self.network_type, self.name)
+
+    @property
+    def label(self) -> str:
+        return NETWORK_TYPE_LABELS.get(self.network_type, self.network_type)
 
 
 def dword_to_ip(value: int) -> str:
     return socket.inet_ntoa(struct.pack("!I", value & 0xFFFFFFFF))
+
+
+def adapter_id(network_type: str, name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return f"{network_type}:{slug or 'adapter'}"
+
+
+def default_adapter_enabled(network_type: str) -> bool:
+    """Por padrão só a rede local entra no monitoramento."""
+    return network_type == "lan"
+
+
+def is_adapter_monitored(
+    adapter: LocalInterface | str,
+    monitored_adapters: dict[str, bool],
+    *,
+    network_type: str | None = None,
+) -> bool:
+    if isinstance(adapter, LocalInterface):
+        key = adapter.id
+        network_type = adapter.network_type
+    else:
+        key = adapter
+        if network_type is None:
+            network_type = key.split(":", 1)[0] if ":" in key else "lan"
+    if key in monitored_adapters:
+        return bool(monitored_adapters[key])
+    return default_adapter_enabled(network_type or "lan")
 
 
 def is_private_ip(ip: str) -> bool:
@@ -57,9 +111,30 @@ def is_radmin_ip(ip: str) -> bool:
     return ip.startswith("26.")
 
 
+def is_tailscale_ip(ip: str) -> bool:
+    try:
+        return ipaddress.IPv4Address(ip) in TAILSCALE_NETWORK
+    except ipaddress.AddressValueError:
+        return False
+
+
+def classify_adapter(name: str, ip: str) -> str | None:
+    """Classifica adaptador em tipo conhecido ou None se deve ser ignorado."""
+    lower = name.lower()
+    if is_radmin_ip(ip) or "radmin" in lower:
+        return "radmin"
+    if is_tailscale_ip(ip) or "tailscale" in lower:
+        return "tailscale"
+    if "wireguard" in lower or re.search(r"\bwg\b", lower) or lower.startswith("wg-"):
+        return "wireguard"
+    if is_private_ip(ip):
+        return "lan"
+    return None
+
+
 def _should_skip_adapter(name: str) -> bool:
     lower = name.lower()
-    if "radmin" in lower:
+    if any(token in lower for token in ADAPTER_KEEP_TOKENS):
         return False
     return any(token in lower for token in ADAPTER_SKIP_TOKENS)
 
@@ -86,12 +161,8 @@ def parse_ipconfig_interfaces(text: str) -> list[LocalInterface]:
         if candidate.startswith(LAN_SKIP_PREFIXES) or candidate in seen_ips:
             continue
 
-        adapter_lower = current_adapter.lower()
-        if is_radmin_ip(candidate) or "radmin" in adapter_lower:
-            network_type = "radmin"
-        elif is_private_ip(candidate):
-            network_type = "lan"
-        else:
+        network_type = classify_adapter(current_adapter, candidate)
+        if network_type is None:
             continue
 
         seen_ips.add(candidate)
@@ -126,7 +197,7 @@ def _run_ipconfig() -> str:
 
 
 def list_local_interfaces() -> list[LocalInterface]:
-    """Lista adaptadores locais (Radmin + LANs privadas), dinamicamente."""
+    """Lista adaptadores locais (LAN + VPNs conhecidas), dinamicamente."""
     interfaces: list[LocalInterface] = []
     try:
         interfaces = parse_ipconfig_interfaces(_run_ipconfig())
@@ -167,7 +238,7 @@ def _lan_from_udp() -> str | None:
 
 
 def get_lan_ips() -> list[str]:
-    """Todos os IPs LAN privados detectados (sem Radmin), preferindo a rota padrão."""
+    """Todos os IPs LAN privados detectados (sem VPNs), preferindo a rota padrão."""
     ips: list[str] = []
     seen: set[str] = set()
     for iface in list_local_interfaces():
@@ -191,11 +262,46 @@ def get_lan_ip() -> str | None:
     return ips[0] if ips else None
 
 
+def get_ips_of_type(network_type: str) -> list[str]:
+    return [iface.ip for iface in list_local_interfaces() if iface.network_type == network_type]
+
+
 def get_local_ips(network_type: str) -> list[str]:
     if network_type == "lan":
         return get_lan_ips()
-    radmin = get_radmin_ip()
-    return [radmin] if radmin else []
+    return get_ips_of_type(network_type)
+
+
+def get_monitored_interfaces(
+    monitored_adapters: dict[str, bool] | None = None,
+) -> list[LocalInterface]:
+    monitored = monitored_adapters if monitored_adapters is not None else {}
+    return [iface for iface in list_local_interfaces() if is_adapter_monitored(iface, monitored)]
+
+
+def get_monitored_ips(
+    network_type: str,
+    monitored_adapters: dict[str, bool] | None = None,
+) -> list[str]:
+    monitored = monitored_adapters if monitored_adapters is not None else {}
+    ips: list[str] = []
+    seen: set[str] = set()
+    for iface in list_local_interfaces():
+        if iface.network_type != network_type:
+            continue
+        if not is_adapter_monitored(iface, monitored):
+            continue
+        if iface.ip in seen:
+            continue
+        seen.add(iface.ip)
+        ips.append(iface.ip)
+
+    if network_type == "lan":
+        preferred = _lan_from_udp()
+        if preferred and preferred in ips:
+            ips.remove(preferred)
+            ips.insert(0, preferred)
+    return ips
 
 
 def get_local_ip(network_type: str) -> str | None:
@@ -204,15 +310,36 @@ def get_local_ip(network_type: str) -> str | None:
 
 
 def format_local_interfaces(interfaces: list[LocalInterface] | None = None) -> str:
-    """Texto curto para status/GUI: 'Radmin VPN: 26… · Ethernet: 192…'."""
+    """Texto curto para status/GUI: 'Ethernet: 192… · Tailscale: 100…'."""
     ifaces = interfaces if interfaces is not None else list_local_interfaces()
     if not ifaces:
         return "Nenhuma rede detectada"
     parts: list[str] = []
     for iface in ifaces:
-        label = "Radmin" if iface.network_type == "radmin" else iface.name
-        parts.append(f"{label}: {iface.ip}")
+        short = NETWORK_TYPE_LABELS.get(iface.network_type, iface.name)
+        if iface.network_type == "lan":
+            short = iface.name
+        parts.append(f"{short}: {iface.ip}")
     return " · ".join(parts)
+
+
+def adapters_snapshot(monitored_adapters: dict[str, bool] | None = None) -> list[dict]:
+    """Lista de adaptadores para o painel (detecção + estado monitorado)."""
+    monitored = monitored_adapters if monitored_adapters is not None else {}
+    rows: list[dict] = []
+    for iface in list_local_interfaces():
+        rows.append(
+            {
+                "id": iface.id,
+                "name": iface.name,
+                "ip": iface.ip,
+                "network_type": iface.network_type,
+                "label": iface.label,
+                "enabled": is_adapter_monitored(iface, monitored),
+                "subnet": str(subnet_for_ip(iface.ip)),
+            }
+        )
+    return rows
 
 
 def subnet_for_ip(ip: str) -> ipaddress.IPv4Network:

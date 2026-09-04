@@ -179,6 +179,45 @@
     tick: 0,
   };
 
+  const adapters = [
+    {
+      id: "lan:ethernet",
+      name: "Ethernet",
+      ip: "192.168.0.5",
+      network_type: "lan",
+      label: "Rede local",
+      enabled: true,
+      subnet: "192.168.0.0/24",
+    },
+    {
+      id: "lan:wi-fi",
+      name: "Wi-Fi",
+      ip: "10.0.0.8",
+      network_type: "lan",
+      label: "Rede local",
+      enabled: true,
+      subnet: "10.0.0.0/24",
+    },
+    {
+      id: "radmin:radmin-vpn",
+      name: "Radmin VPN",
+      ip: "26.0.0.1",
+      network_type: "radmin",
+      label: "Radmin VPN",
+      enabled: true,
+      subnet: "26.0.0.0/24",
+    },
+    {
+      id: "tailscale:tailscale",
+      name: "Tailscale",
+      ip: "100.64.1.2",
+      network_type: "tailscale",
+      label: "Tailscale",
+      enabled: false,
+      subnet: "100.64.1.0/24",
+    },
+  ];
+
   function statusOf(peer) {
     if (peer.hidden) {
       return "Oculto";
@@ -244,11 +283,15 @@
     const offline_count = Math.max(visible.length - online_count, 0);
 
     const now = new Date();
+    const monitored = adapters.filter((a) => a.enabled);
     return {
       radmin_ip: "26.0.0.1",
       lan_ip: "192.168.0.5",
       lan_ips: ["192.168.0.5", "10.0.0.8"],
-      local_ips: "Radmin: 26.0.0.1 · Ethernet: 192.168.0.5 · Wi-Fi: 10.0.0.8",
+      local_ips: monitored.length
+        ? monitored.map((a) => `${a.name}: ${a.ip}`).join(" · ")
+        : "Nenhuma rede monitorada",
+      adapters: adapters.map((a) => ({ ...a })),
       interval_seconds: 15,
       notifications_enabled: state.notifications_enabled,
       history_retention_days: state.history_retention_days,
@@ -308,6 +351,14 @@
     },
     set_notifications(enabled) {
       state.notifications_enabled = Boolean(enabled);
+      return true;
+    },
+    set_adapter_monitored(adapterId, enabled) {
+      const adapter = adapters.find((a) => a.id === String(adapterId));
+      if (!adapter) {
+        return false;
+      }
+      adapter.enabled = Boolean(enabled);
       return true;
     },
     set_history_retention(days) {

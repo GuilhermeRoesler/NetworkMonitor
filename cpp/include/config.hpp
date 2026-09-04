@@ -15,7 +15,7 @@ struct Peer {
     std::string ip;
     std::string name;
     std::string network_name;
-    std::string network_type{"radmin"};
+    std::string network_type{"lan"};
     bool hidden{false};
     bool muted{false};
     std::optional<bool> online;
@@ -36,6 +36,7 @@ struct MonitorConfig {
     bool notifications_enabled{true};
     int history_retention_days{kHistoryRetentionDefault};
     std::vector<std::string> peer_order;
+    std::unordered_map<std::string, bool> monitored_adapters;
     std::vector<NetworkConfig> networks;
 
     std::vector<Peer> all_peers() const;
@@ -73,6 +74,8 @@ bool update_peer_name(const std::string& ip, const std::string& new_name);
 bool set_peer_hidden(const std::string& ip, bool hidden);
 bool set_peer_muted(const std::string& ip, bool muted);
 void set_notifications_enabled(bool enabled);
+bool set_adapter_monitored(const std::string& adapter_id, bool enabled);
+void ensure_network_type_enabled(const std::string& network_type);
 void save_peer_order(const std::vector<std::string>& order);
 bool move_peer(const std::string& dragged_ip, const std::string& target_ip);
 bool move_peer_to_end(const std::string& dragged_ip);
