@@ -205,7 +205,10 @@ class StatusWindow:
                 logging.exception("Falha ao exibir o painel WebView")
 
     def close(self) -> None:
-        window = self._window
+        """Encerra o loop WebView (quit). Desliga close_hides para o destroy não ser cancelado."""
+        with self._lock:
+            self._close_hides = False
+            window = self._window
         if window is None:
             return
         try:

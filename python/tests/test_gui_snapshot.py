@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gui import build_snapshot, resolve_ui_dir, status_label
+from gui import StatusWindow, build_snapshot, resolve_ui_dir, status_label
 
 
 def test_resolve_ui_dir_has_index() -> None:
@@ -16,6 +16,32 @@ def test_status_label() -> None:
     assert status_label(True) == "Online"
     assert status_label(False) == "Offline"
     assert status_label(None) == "Desconhecido"
+
+
+def test_close_allows_destroy_when_close_hides() -> None:
+    """Encerrar pela bandeja não pode ser cancelado por close_hides (senão o processo trava)."""
+
+    class FakeWindow:
+        def __init__(self) -> None:
+            self.destroyed = False
+            self.hidden = False
+
+        def hide(self) -> None:
+            self.hidden = True
+
+        def destroy(self) -> None:
+            self.destroyed = True
+
+    window = StatusWindow()
+    window._close_hides = True
+    fake = FakeWindow()
+    window._window = fake
+
+    window.close()
+
+    assert window._close_hides is False
+    assert fake.destroyed is True
+    assert window._on_closing() is True
 
 
 def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
