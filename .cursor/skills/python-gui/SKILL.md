@@ -20,7 +20,7 @@ description: >-
 
 ## UI
 
-- Lista: Nome · IP · Latência · Status (pills)
+- Lista: Nome · IP · Latência · Status (pills); clique no header ordena (asc→desc→manual); DnD pausado enquanto ordenado
 - Toolbar: Atualizar · Notificações · Mostrar ocultos · Histórico (retenção 1/3/7/14/30 dias)
 - Abas: **Peers** (lista/tabela, default) · **Adaptadores** (checkboxes de NICs; config secundária)
 - Tema dark utilitário

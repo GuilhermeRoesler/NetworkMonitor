@@ -222,11 +222,19 @@
 
           <div class="panel-board">
             <div class="table-wrap">
-              <div class="table-head" role="row">
-                <span>Nome</span>
-                <span>IP</span>
-                <span>Latência</span>
-                <span>Status</span>
+              <div class="table-head" role="row" id="table-head">
+                <button type="button" class="th-sort" data-sort="name" aria-sort="none">
+                  Nome<span class="th-ind" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="th-sort" data-sort="ip" aria-sort="none">
+                  IP<span class="th-ind" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="th-sort" data-sort="rtt" aria-sort="none">
+                  Latência<span class="th-ind" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="th-sort" data-sort="status" aria-sort="none">
+                  Status<span class="th-ind" aria-hidden="true"></span>
+                </button>
               </div>
               <div class="list-scroll" id="list-scroll">
                 <div id="peer-list" class="peer-list" role="list"></div>

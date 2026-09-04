@@ -27,6 +27,15 @@
     density: "nm-ui-density",
     status: "nm-ui-status-filter",
     view: "nm-ui-view",
+    sort: "nm-ui-sort",
+  };
+
+  const SORT_COLUMNS = ["name", "ip", "rtt", "status"];
+  const STATUS_SORT_RANK = {
+    Online: 0,
+    Offline: 1,
+    Desconhecido: 2,
+    Oculto: 3,
   };
 
   const els = {
@@ -40,6 +49,7 @@
     adaptersEmpty: document.getElementById("adapters-empty"),
     list: document.getElementById("peer-list"),
     listScroll: document.getElementById("list-scroll"),
+    tableHead: document.getElementById("table-head"),
     empty: document.getElementById("empty-state"),
     emptyTitle: document.getElementById("empty-title"),
     emptyCopy: document.getElementById("empty-copy"),
@@ -76,6 +86,8 @@
   let statusFilter = "all";
   let searchQuery = "";
   let density = "comfortable";
+  let sortColumn = null;
+  let sortDir = "asc";
   let searchTimer = null;
   let pollMs = 15000;
   let pollTimer = null;
@@ -485,6 +497,13 @@
 
   function peerListSignature(peers) {
     const parts = [];
+    if (sortColumn) {
+      parts.push(`s:${sortColumn}:${sortDir}`);
+      for (const peer of peers) {
+        parts.push(`p:${peer.ip}`);
+      }
+      return parts.join("|");
+    }
     let lastKey = null;
     for (const peer of peers) {
       const key = networkKey(peer);
@@ -499,6 +518,9 @@
 
   function currentListSignature() {
     const parts = [];
+    if (sortColumn) {
+      parts.push(`s:${sortColumn}:${sortDir}`);
+    }
     for (const child of els.list.children) {
       if (child.classList.contains("section-header")) {
         const key =
@@ -723,7 +745,7 @@
 
   function bindSortable() {
     destroySortable();
-    if (isViewFiltered()) {
+    if (isReorderLocked()) {
       els.list.classList.add("is-filtered");
       return;
     }
@@ -769,6 +791,145 @@
 
   function isViewFiltered() {
     return statusFilter !== "all" || Boolean(searchQuery.trim());
+  }
+
+  function isReorderLocked() {
+    return isViewFiltered() || Boolean(sortColumn);
+  }
+
+  function parseIpv4(ip) {
+    const parts = String(ip || "").split(".");
+    if (parts.length !== 4) {
+      return null;
+    }
+    const nums = parts.map((p) => Number(p));
+    if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return null;
+    }
+    return ((nums[0] << 24) >>> 0) + (nums[1] << 16) + (nums[2] << 8) + nums[3];
+  }
+
+  function comparePeers(a, b) {
+    const dir = sortDir === "desc" ? -1 : 1;
+    let cmp = 0;
+    if (sortColumn === "name") {
+      cmp = String(a.name || "").localeCompare(String(b.name || ""), "pt", {
+        sensitivity: "base",
+      });
+    } else if (sortColumn === "ip") {
+      const ai = parseIpv4(a.ip);
+      const bi = parseIpv4(b.ip);
+      if (ai !== null && bi !== null) {
+        cmp = ai < bi ? -1 : ai > bi ? 1 : 0;
+      } else {
+        cmp = String(a.ip || "").localeCompare(String(b.ip || ""), "en");
+      }
+    } else if (sortColumn === "rtt") {
+      const ar =
+        a.status === "Online" && Number.isFinite(Number(a.rtt_ms))
+          ? Number(a.rtt_ms)
+          : null;
+      const br =
+        b.status === "Online" && Number.isFinite(Number(b.rtt_ms))
+          ? Number(b.rtt_ms)
+          : null;
+      if (ar === null && br === null) {
+        cmp = 0;
+      } else if (ar === null) {
+        return 1;
+      } else if (br === null) {
+        return -1;
+      } else {
+        cmp = ar - br;
+      }
+    } else if (sortColumn === "status") {
+      const ar = STATUS_SORT_RANK[a.status] ?? 9;
+      const br = STATUS_SORT_RANK[b.status] ?? 9;
+      cmp = ar - br;
+      if (cmp === 0) {
+        cmp = String(a.status || "").localeCompare(String(b.status || ""), "pt");
+      }
+    }
+    if (cmp !== 0) {
+      return cmp * dir;
+    }
+    return String(a.ip || "").localeCompare(String(b.ip || ""), "en");
+  }
+
+  function sortPeers(peers) {
+    if (!sortColumn) {
+      return peers;
+    }
+    return [...peers].sort(comparePeers);
+  }
+
+  function persistSortPrefs() {
+    try {
+      if (!sortColumn) {
+        localStorage.removeItem(STORAGE.sort);
+      } else {
+        localStorage.setItem(STORAGE.sort, `${sortColumn}:${sortDir}`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function updateSortChrome() {
+    if (!els.tableHead) {
+      return;
+    }
+    const labels = {
+      name: "Nome",
+      ip: "IP",
+      rtt: "Latência",
+      status: "Status",
+    };
+    for (const btn of els.tableHead.querySelectorAll("[data-sort]")) {
+      const key = btn.dataset.sort;
+      const active = sortColumn === key;
+      const label = labels[key] || key;
+      btn.classList.toggle("is-sorted", active);
+      btn.setAttribute(
+        "aria-sort",
+        active ? (sortDir === "desc" ? "descending" : "ascending") : "none",
+      );
+      btn.title = active
+        ? `Ordenado por ${label} (${sortDir === "desc" ? "decrescente" : "crescente"}). Clique para ${
+            sortDir === "asc" ? "inverter" : "restaurar ordem manual"
+          }.`
+        : `Ordenar por ${label}`;
+    }
+  }
+
+  function setSort(column, dir = "asc", { render = true } = {}) {
+    if (!column || !SORT_COLUMNS.includes(column)) {
+      sortColumn = null;
+      sortDir = "asc";
+    } else {
+      sortColumn = column;
+      sortDir = dir === "desc" ? "desc" : "asc";
+    }
+    persistSortPrefs();
+    updateSortChrome();
+    if (render && snapshot) {
+      renderPeers(snapshot);
+    }
+  }
+
+  function cycleSort(column) {
+    if (!SORT_COLUMNS.includes(column)) {
+      return;
+    }
+    if (sortColumn !== column) {
+      setSort(column, "asc");
+      return;
+    }
+    if (sortDir === "asc") {
+      setSort(column, "desc");
+      return;
+    }
+    setSort(null);
   }
 
   function matchesStatus(peer) {
@@ -836,9 +997,10 @@
 
   function renderPeers(snap) {
     const allPeers = snap.peers || [];
-    const peers = filterPeers(allPeers);
+    const peers = sortPeers(filterPeers(allPeers));
     const totalKnown = (snap.visible_count || 0) + (snap.hidden_count || 0);
     updateFilterChrome(allPeers.length, peers.length);
+    updateSortChrome();
 
     if (allPeers.length === 0) {
       destroySortable();
@@ -877,22 +1039,28 @@
       [...els.list.querySelectorAll(".peer-row")].map((row) => row.dataset.ip),
     );
 
-    // Headers só quando o tipo muda — preserva peer_order / DnD.
+    // Headers de rede só na ordem manual — com sort a lista fica plana.
     const parts = [];
-    let lastKey = null;
-    for (const peer of peers) {
-      const key = networkKey(peer);
-      if (key !== lastKey) {
-        const title = NETWORK_SECTION[key] || key;
-        const count = peers.filter((p) => networkKey(p) === key).length;
-        parts.push(`
+    if (sortColumn) {
+      for (const peer of peers) {
+        parts.push(renderPeerRow(peer));
+      }
+    } else {
+      let lastKey = null;
+      for (const peer of peers) {
+        const key = networkKey(peer);
+        if (key !== lastKey) {
+          const title = NETWORK_SECTION[key] || key;
+          const count = peers.filter((p) => networkKey(p) === key).length;
+          parts.push(`
           <div class="section-header ${key}" role="presentation">
             <span>${title}</span>
             <span class="section-count">${count}</span>
           </div>`);
-        lastKey = key;
+          lastKey = key;
+        }
+        parts.push(renderPeerRow(peer));
       }
-      parts.push(renderPeerRow(peer));
     }
     els.list.innerHTML = parts.join("");
 
@@ -983,15 +1151,23 @@
       const savedDensity = localStorage.getItem(STORAGE.density);
       const savedStatus = localStorage.getItem(STORAGE.status);
       const savedView = localStorage.getItem(STORAGE.view);
+      const savedSort = localStorage.getItem(STORAGE.sort) || "";
       setDensity(savedDensity === "compact" ? "compact" : "comfortable");
       setStatusFilter(
         ["all", "online", "offline", "other"].includes(savedStatus) ? savedStatus : "all",
       );
       setActiveView(savedView === "adapters" ? "adapters" : "peers");
+      const [col, dir] = savedSort.split(":");
+      setSort(
+        SORT_COLUMNS.includes(col) ? col : null,
+        dir === "desc" ? "desc" : "asc",
+        { render: false },
+      );
     } catch {
       setDensity("comfortable");
       setStatusFilter("all");
       setActiveView("peers");
+      setSort(null, "asc", { render: false });
     }
   }
 
@@ -1466,6 +1642,14 @@
       return;
     }
     setDensity(btn.dataset.density);
+  });
+
+  els.tableHead?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-sort]");
+    if (!btn || !els.tableHead.contains(btn)) {
+      return;
+    }
+    cycleSort(btn.dataset.sort);
   });
 
   els.list.addEventListener("scroll", updateScrollFades, { passive: true });

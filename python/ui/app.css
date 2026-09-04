@@ -1202,6 +1202,60 @@ kbd {
   flex-shrink: 0;
 }
 
+.th-sort {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 140ms var(--ease);
+}
+
+.th-sort:hover,
+.th-sort.is-sorted {
+  color: var(--text);
+}
+
+.th-sort:focus-visible {
+  outline: 2px solid rgba(42, 159, 150, 0.5);
+  outline-offset: 2px;
+}
+
+.th-ind {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-bottom: 5px solid currentColor;
+  transform: translateY(0.5px);
+  transition: opacity 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.th-sort:hover .th-ind {
+  opacity: 0.35;
+}
+
+.th-sort.is-sorted .th-ind {
+  opacity: 0.9;
+  color: var(--accent);
+}
+
+.th-sort[aria-sort="descending"] .th-ind {
+  transform: translateY(0.5px) rotate(180deg);
+}
+
 .list-scroll {
   position: relative;
   flex: 1;
