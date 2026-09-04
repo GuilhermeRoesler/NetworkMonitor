@@ -137,6 +137,10 @@ def build_snapshot(*, show_hidden: bool) -> dict:
                 "network_name": peer.network_name,
                 "rtt_ms": runtime.get("rtt_ms"),
                 "last_seen": runtime.get("last_seen"),
+                "hostname": runtime.get("hostname"),
+                "mac": runtime.get("mac"),
+                "vendor": runtime.get("vendor"),
+                "os_hint": runtime.get("os_hint"),
             }
         )
 

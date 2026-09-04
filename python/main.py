@@ -116,13 +116,292 @@ PRIVATE_NETWORKS = (
 
 _RTT_RE = re.compile(r"(?:tempo|time)\s*=\s*(\d+)\s*ms", re.IGNORECASE)
 _RTT_LT1_RE = re.compile(r"(?:tempo|time)\s*<\s*1\s*ms", re.IGNORECASE)
+_TTL_RE = re.compile(r"ttl\s*=\s*(\d+)", re.IGNORECASE)
+_ARP_LINE_RE = re.compile(
+    r"^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})\s+",
+    re.IGNORECASE,
+)
+_HOSTNAME_REFRESH_SECONDS = 300
+
+# Prefixo OUI (3 octetos) → fabricante comum. Heurística leve, sem base IEEE completa.
+_OUI_VENDORS: dict[str, str] = {
+    "00:50:56": "VMware",
+    "00:0c:29": "VMware",
+    "00:1a:4a": "Radmin / Famatech",
+    "00:1c:42": "Parallels",
+    "08:00:27": "VirtualBox",
+    "52:54:00": "QEMU / KVM",
+    "b8:27:eb": "Raspberry Pi",
+    "dc:a6:32": "Raspberry Pi",
+    "e4:5f:01": "Raspberry Pi",
+    "28:cd:c1": "Raspberry Pi",
+    "00:1a:79": "Apple",
+    "00:23:12": "Apple",
+    "00:25:00": "Apple",
+    "00:26:4a": "Apple",
+    "00:26:b0": "Apple",
+    "00:26:bb": "Apple",
+    "04:0c:ce": "Apple",
+    "28:37:37": "Apple",
+    "3c:07:54": "Apple",
+    "a4:83:e7": "Apple",
+    "ac:87:a3": "Apple",
+    "f0:18:98": "Apple",
+    "f4:5c:89": "Apple",
+    "00:1b:63": "Apple",
+    "00:17:f2": "Apple",
+    "00:03:93": "Apple",
+    "00:0d:93": "Apple",
+    "00:16:cb": "Apple",
+    "00:1e:c2": "Apple",
+    "00:21:e9": "Apple",
+    "00:22:41": "Apple",
+    "00:23:df": "Apple",
+    "00:24:36": "Apple",
+    "00:25:4b": "Apple",
+    "00:25:bc": "Apple",
+    "00:26:08": "Apple",
+    "00:26:4a": "Apple",
+    "18:65:90": "Apple",
+    "2c:be:08": "Apple",
+    "60:f8:1d": "Apple",
+    "70:56:81": "Apple",
+    "78:31:c1": "Apple",
+    "88:63:df": "Apple",
+    "a8:60:b6": "Apple",
+    "b8:f6:b1": "Apple",
+    "c8:bc:c8": "Apple",
+    "d0:03:4b": "Apple",
+    "d8:30:62": "Apple",
+    "e0:b9:ba": "Apple",
+    "f0:d1:a9": "Apple",
+    "00:14:22": "Dell",
+    "00:1e:4f": "Dell",
+    "00:21:70": "Dell",
+    "00:22:19": "Dell",
+    "00:24:e8": "Dell",
+    "14:fe:b5": "Dell",
+    "18:a9:05": "Dell",
+    "24:b6:fd": "Dell",
+    "34:17:eb": "Dell",
+    "b8:2a:72": "Dell",
+    "d4:be:d9": "Dell",
+    "f8:b1:56": "Dell",
+    "00:1a:2b": "Ayecom / IoT",
+    "00:09:2d": "HTC",
+    "00:16:6c": "Samsung",
+    "00:1d:25": "Samsung",
+    "00:1e:7d": "Samsung",
+    "00:21:19": "Samsung",
+    "00:23:39": "Samsung",
+    "00:26:37": "Samsung",
+    "08:37:3d": "Samsung",
+    "14:89:fd": "Samsung",
+    "18:3a:2d": "Samsung",
+    "34:23:ba": "Samsung",
+    "38:aa:3c": "Samsung",
+    "5c:0a:5b": "Samsung",
+    "8c:71:f8": "Samsung",
+    "a0:07:98": "Samsung",
+    "c4:73:1e": "Samsung",
+    "e8:50:8b": "Samsung",
+    "f4:09:d8": "Samsung",
+    "00:1e:65": "Intel",
+    "00:1b:21": "Intel",
+    "00:13:e8": "Intel",
+    "00:15:00": "Intel",
+    "00:19:d1": "Intel",
+    "00:1e:67": "Intel",
+    "00:21:6a": "Intel",
+    "00:22:fa": "Intel",
+    "00:24:d7": "Intel",
+    "3c:a9:f4": "Intel",
+    "68:05:ca": "Intel",
+    "a0:36:9f": "Intel",
+    "f8:63:3f": "Intel",
+    "00:e0:4c": "Realtek",
+    "52:54:00": "QEMU / KVM",
+    "00:0f:ea": "Giga-Byte",
+    "1c:6f:65": "Giga-Byte",
+    "74:d4:35": "Giga-Byte",
+    "90:2b:34": "Giga-Byte",
+    "00:1a:92": "ASUS",
+    "00:1d:60": "ASUS",
+    "00:22:15": "ASUS",
+    "00:24:8c": "ASUS",
+    "04:92:26": "ASUS",
+    "10:bf:48": "ASUS",
+    "14:dd:a9": "ASUS",
+    "1c:87:2c": "ASUS",
+    "2c:4d:54": "ASUS",
+    "30:85:a9": "ASUS",
+    "38:d5:47": "ASUS",
+    "50:46:5d": "ASUS",
+    "54:04:a6": "ASUS",
+    "60:45:cb": "ASUS",
+    "70:4d:7b": "ASUS",
+    "74:d0:2b": "ASUS",
+    "ac:9e:17": "ASUS",
+    "b0:6e:bf": "ASUS",
+    "e0:3f:49": "ASUS",
+    "f4:6d:04": "ASUS",
+    "00:18:e7": "TP-Link",
+    "00:1d:0f": "TP-Link",
+    "00:25:86": "TP-Link",
+    "14:cc:20": "TP-Link",
+    "14:eb:b6": "TP-Link",
+    "50:c7:bf": "TP-Link",
+    "60:e3:27": "TP-Link",
+    "98:da:c4": "TP-Link",
+    "a0:f3:c1": "TP-Link",
+    "b0:4e:26": "TP-Link",
+    "c0:25:e9": "TP-Link",
+    "ec:08:6b": "TP-Link",
+    "f4:f2:6d": "TP-Link",
+    "00:09:5b": "Netgear",
+    "00:1b:2f": "Netgear",
+    "00:1e:2a": "Netgear",
+    "00:1f:33": "Netgear",
+    "00:22:3f": "Netgear",
+    "00:24:b2": "Netgear",
+    "20:4e:7f": "Netgear",
+    "28:c6:8e": "Netgear",
+    "30:46:9a": "Netgear",
+    "a0:04:60": "Netgear",
+    "a4:2b:8c": "Netgear",
+    "c4:04:15": "Netgear",
+    "e0:46:9a": "Netgear",
+    "00:17:88": "Philips Hue",
+    "00:1a:22": "Xiaomi",
+    "00:9e:c8": "Xiaomi",
+    "04:cf:8c": "Xiaomi",
+    "0c:1d:af": "Xiaomi",
+    "14:f6:5a": "Xiaomi",
+    "28:6c:07": "Xiaomi",
+    "34:80:b3": "Xiaomi",
+    "50:64:2b": "Xiaomi",
+    "64:09:80": "Xiaomi",
+    "64:b4:73": "Xiaomi",
+    "68:df:dd": "Xiaomi",
+    "78:11:dc": "Xiaomi",
+    "7c:1d:d9": "Xiaomi",
+    "8c:be:be": "Xiaomi",
+    "9c:99:a0": "Xiaomi",
+    "a4:50:46": "Xiaomi",
+    "ac:c1:ee": "Xiaomi",
+    "f0:b4:29": "Xiaomi",
+    "f8:a4:5f": "Xiaomi",
+    "fc:64:ba": "Xiaomi",
+    "00:17:9a": "D-Link",
+    "00:1b:11": "D-Link",
+    "00:1c:f0": "D-Link",
+    "00:21:91": "D-Link",
+    "00:24:01": "D-Link",
+    "00:26:5a": "D-Link",
+    "1c:7e:e5": "D-Link",
+    "28:10:7b": "D-Link",
+    "34:08:04": "D-Link",
+    "78:32:1b": "D-Link",
+    "90:94:e4": "D-Link",
+    "c8:be:19": "D-Link",
+    "cc:b2:55": "D-Link",
+    "00:50:f2": "Microsoft",
+    "00:15:5d": "Microsoft Hyper-V",
+    "7c:1e:52": "Microsoft",
+    "00:0d:3a": "Microsoft",
+    "28:18:78": "Microsoft",
+    "3c:83:75": "Microsoft",
+    "60:45:bd": "Microsoft",
+    "dc:b4:c4": "Microsoft",
+}
 
 # Métricas de runtime para a GUI (não persistidas).
 _peer_runtime: dict[str, dict[str, object]] = {}
 _peer_runtime_lock = threading.Lock()
+_arp_cache: dict[str, str] = {}
+_arp_cache_at: float = 0.0
+_ARP_CACHE_TTL_SECONDS = 30.0
 
 
-def record_peer_ping(ip: str, online: bool, rtt_ms: int | None) -> None:
+def normalize_mac(raw: str) -> str:
+    hex_only = re.sub(r"[^0-9A-Fa-f]", "", raw)
+    if len(hex_only) != 12:
+        return raw.replace("-", ":").upper()
+    parts = [hex_only[i : i + 2].upper() for i in range(0, 12, 2)]
+    return ":".join(parts)
+
+
+def vendor_from_mac(mac: str) -> str | None:
+    normalized = normalize_mac(mac).lower()
+    parts = normalized.split(":")
+    if len(parts) < 3:
+        return None
+    return _OUI_VENDORS.get(":".join(parts[:3]))
+
+
+def os_hint_from_ttl(ttl: int) -> str | None:
+    """Heurística pelo TTL inicial típico (após hops o valor cai, mas a faixa ainda ajuda)."""
+    if ttl <= 0:
+        return None
+    if ttl <= 64:
+        return "Linux / macOS"
+    if ttl <= 128:
+        return "Windows"
+    return "Roteador / IoT"
+
+
+def parse_ping_ttl(output: str) -> int | None:
+    match = _TTL_RE.search(output)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def parse_arp_table(output: str) -> dict[str, str]:
+    table: dict[str, str] = {}
+    for line in output.splitlines():
+        match = _ARP_LINE_RE.match(line)
+        if not match:
+            continue
+        ip = match.group(1)
+        mac = normalize_mac(match.group(2))
+        if mac.replace(":", "").lower() in {"000000000000", "ffffffffffff"}:
+            continue
+        table[ip] = mac
+    return table
+
+
+def load_arp_table(*, force: bool = False) -> dict[str, str]:
+    """Mapa IP → MAC via `arp -a` (cache curto)."""
+    global _arp_cache, _arp_cache_at
+    now = time.monotonic()
+    if not force and _arp_cache and (now - _arp_cache_at) < _ARP_CACHE_TTL_SECONDS:
+        return dict(_arp_cache)
+    try:
+        result = subprocess.run(
+            ["arp", "-a"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        table = parse_arp_table(result.stdout)
+        _arp_cache = table
+        _arp_cache_at = now
+        return dict(table)
+    except (subprocess.SubprocessError, OSError):
+        return dict(_arp_cache)
+
+
+def record_peer_ping(
+    ip: str,
+    online: bool,
+    rtt_ms: int | None,
+    *,
+    ttl: int | None = None,
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     with _peer_runtime_lock:
         entry = _peer_runtime.setdefault(ip, {})
@@ -130,8 +409,84 @@ def record_peer_ping(ip: str, online: bool, rtt_ms: int | None) -> None:
         if online:
             entry["rtt_ms"] = rtt_ms
             entry["last_seen"] = now
+            if ttl is not None:
+                entry["ttl"] = ttl
+                hint = os_hint_from_ttl(ttl)
+                if hint:
+                    entry["os_hint"] = hint
         else:
             entry["rtt_ms"] = None
+
+
+def enrich_peer_identity(ip: str, *, arp: dict[str, str] | None = None) -> None:
+    """Atualiza MAC / fabricante no runtime (não persiste)."""
+    arp_table = arp if arp is not None else load_arp_table()
+    mac = arp_table.get(ip)
+    if not mac:
+        return
+    with _peer_runtime_lock:
+        entry = _peer_runtime.setdefault(ip, {})
+        entry["mac"] = mac
+        vendor = vendor_from_mac(mac)
+        if vendor:
+            entry["vendor"] = vendor
+
+
+def _needs_hostname_refresh(ip: str) -> bool:
+    now = time.monotonic()
+    with _peer_runtime_lock:
+        entry = _peer_runtime.get(ip, {})
+        last_host_at = float(entry.get("hostname_at") or 0)
+        return "hostname" not in entry or (now - last_host_at) >= _HOSTNAME_REFRESH_SECONDS
+
+
+def refresh_peer_hostname(ip: str) -> None:
+    hostname = resolve_hostname(ip)
+    now = time.monotonic()
+    with _peer_runtime_lock:
+        entry = _peer_runtime.setdefault(ip, {})
+        entry["hostname_at"] = now
+        if hostname:
+            entry["hostname"] = hostname
+
+
+def enrich_online_peers(
+    ips: list[str],
+    *,
+    stop_event: threading.Event | None = None,
+    max_hostname_lookups: int = 4,
+) -> None:
+    """MAC via ARP (barato) + hostname limitado por ciclo (DNS pode ser lento)."""
+    if not ips:
+        return
+    arp = load_arp_table()
+    for ip in ips:
+        if stop_event is not None and stop_event.is_set():
+            return
+        enrich_peer_identity(ip, arp=arp)
+
+    pending = [ip for ip in ips if _needs_hostname_refresh(ip)][:max_hostname_lookups]
+    if not pending:
+        return
+
+    def worker(target_ip: str) -> None:
+        if stop_event is not None and stop_event.is_set():
+            return
+        previous = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(0.9)
+            refresh_peer_hostname(target_ip)
+        finally:
+            socket.setdefaulttimeout(previous)
+
+    threads = [
+        threading.Thread(target=worker, args=(ip,), daemon=True, name=f"nm-host-{ip}")
+        for ip in pending
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2.5)
 
 
 def get_peer_runtime(ip: str) -> dict[str, object]:
@@ -713,7 +1068,9 @@ def parse_ping_rtt_ms(output: str) -> int | None:
     return None
 
 
-def ping_host_with_rtt(ip: str, timeout_ms: int = 1000) -> tuple[bool, int | None]:
+def ping_host_with_rtt(
+    ip: str, timeout_ms: int = 1000
+) -> tuple[bool, int | None, int | None]:
     try:
         result = subprocess.run(
             ["ping", "-n", "1", "-w", str(timeout_ms), ip],
@@ -727,17 +1084,36 @@ def ping_host_with_rtt(ip: str, timeout_ms: int = 1000) -> tuple[bool, int | Non
         output = result.stdout
         lower = output.lower()
         online = "ttl=" in lower or "ttl =" in lower
-        return online, parse_ping_rtt_ms(output) if online else None
+        if not online:
+            return False, None, None
+        return online, parse_ping_rtt_ms(output), parse_ping_ttl(output)
     except (subprocess.SubprocessError, OSError):
-        return False, None
+        return False, None, None
 
 
 def ping_host(ip: str, timeout_ms: int = 1000) -> bool:
-    online, _ = ping_host_with_rtt(ip, timeout_ms)
+    online, _, _ = ping_host_with_rtt(ip, timeout_ms)
     return online
 
 
 def resolve_hostname(ip: str) -> str | None:
+    def _clean(name: str) -> str | None:
+        cleaned = name.strip().strip(".")
+        if not cleaned or cleaned == ip:
+            return None
+        # Aceita hostname DNS/NetBIOS simples.
+        if re.match(r"^[\w\-.]+$", cleaned, re.UNICODE):
+            return cleaned
+        return None
+
+    try:
+        host, _, _ = socket.gethostbyaddr(ip)
+        cleaned = _clean(host)
+        if cleaned:
+            return cleaned
+    except OSError:
+        pass
+
     try:
         result = subprocess.run(
             ["ping", "-n", "1", "-a", "-w", "1000", ip],
@@ -750,9 +1126,7 @@ def resolve_hostname(ip: str) -> str | None:
         )
         match = re.search(r"(?:Disparando|Pinging)\s+(\S+)\s+\[", result.stdout, re.IGNORECASE)
         if match:
-            name = match.group(1).strip(".")
-            if name != ip and re.match(r"^[\w\-.]+$", name):
-                return name
+            return _clean(match.group(1))
     except (subprocess.SubprocessError, OSError):
         pass
     return None
@@ -764,12 +1138,12 @@ def _ping_hosts_parallel(
     *,
     max_workers: int,
     stop_event: threading.Event | None = None,
-) -> dict[str, tuple[bool, int | None]]:
+) -> dict[str, tuple[bool, int | None, int | None]]:
     """Ping em paralelo com threads daemon; respeita stop_event entre hosts."""
     if not ips:
         return {}
 
-    results: dict[str, tuple[bool, int | None]] = {}
+    results: dict[str, tuple[bool, int | None, int | None]] = {}
     results_lock = threading.Lock()
     next_index = 0
     index_lock = threading.Lock()
@@ -784,9 +1158,9 @@ def _ping_hosts_parallel(
                 next_index += 1
             if index >= len(ips):
                 return
-            online, rtt_ms = ping_host_with_rtt(ips[index], timeout_ms)
+            online, rtt_ms, ttl = ping_host_with_rtt(ips[index], timeout_ms)
             with results_lock:
-                results[ips[index]] = (online, rtt_ms)
+                results[ips[index]] = (online, rtt_ms, ttl)
 
     workers = min(max_workers, len(ips))
     threads = [
@@ -823,7 +1197,7 @@ def discover_peers(
     )
 
     discovered: list[Peer] = []
-    for ip, (online, _) in ping_results.items():
+    for ip, (online, _rtt, _ttl) in ping_results.items():
         if stop_event is not None and stop_event.is_set():
             break
         if not online or ip in known_ips:
@@ -988,11 +1362,11 @@ def check_peers(
         stop_event=stop_event,
     )
 
-    for ip, (online, rtt_ms) in ping_results.items():
+    for ip, (online, rtt_ms, ttl) in ping_results.items():
         peer = by_ip[ip]
         current[ip] = online
         peer.online = online
-        record_peer_ping(ip, online, rtt_ms)
+        record_peer_ping(ip, online, rtt_ms, ttl=ttl)
 
         if stop_event is not None and stop_event.is_set():
             continue
@@ -1004,6 +1378,10 @@ def check_peers(
             title=f"[{peer.network_name}] {peer.name} {status}",
             message=f"IP: {peer.ip}",
         )
+
+    online_ips = [ip for ip, (online, _rtt, _ttl) in ping_results.items() if online]
+    if online_ips and (stop_event is None or not stop_event.is_set()):
+        enrich_online_peers(online_ips, stop_event=stop_event)
 
     for peer in peers:
         if peer.hidden and peer.ip in current:
@@ -1398,6 +1776,9 @@ def process_network(
         last_scan = now
 
     if not peers and network.auto_discover:
+        # Sem peers: só reescanear no intervalo (antes reescaneava a cada ciclo ~15s).
+        if last_scan > 0 and (now - last_scan) < config.scan_interval_seconds:
+            return peers, last_scan, config_changed
         if stop_event is not None and stop_event.is_set():
             return peers, last_scan, config_changed
         logging.info(
@@ -1417,6 +1798,7 @@ def process_network(
         if discovered:
             persist_discovered_peers(network.name, discovered)
             config_changed = True
+        last_scan = now
 
     return peers, last_scan, config_changed
 
@@ -1741,4 +2123,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # `python main.py` carrega este arquivo como `__main__`. A GUI faz `import main`
+    # e, sem o alias, vira um 2º módulo — RTT/hostname/MAC ficam na memória errada
+    # enquanto o status (state.json) parece ok.
+    sys.modules["main"] = sys.modules[__name__]
     main()

@@ -409,10 +409,18 @@
   }
 
   function peerSubParts(peer) {
-    const net = networkKey(peer);
     const parts = [];
-    if (peer.network_name && peer.network_name !== NETWORK_SECTION[net]) {
-      parts.push(String(peer.network_name));
+    const hostname = peer.hostname ? String(peer.hostname) : "";
+    if (hostname && hostname.toLowerCase() !== String(peer.name || "").toLowerCase()) {
+      parts.push(hostname);
+    }
+    if (peer.os_hint) {
+      parts.push(String(peer.os_hint));
+    }
+    if (peer.vendor) {
+      parts.push(String(peer.vendor));
+    } else if (peer.mac) {
+      parts.push(String(peer.mac));
     }
     if (peer.status !== "Online") {
       const lastSeen = formatLastSeen(peer.last_seen);
@@ -454,7 +462,6 @@
     const selected = peer.ip === selectedIp ? " selected" : "";
     const expanded = peer.ip === expandedIp ? " is-expanded" : "";
     const klass = statusClass(peer.status);
-    const net = networkKey(peer);
     const mutedBadge =
       peer.muted && !peer.hidden ? `<span class="badge-muted">Silenciado</span>` : "";
     const rtt = formatRtt(peer.status === "Online" ? peer.rtt_ms : null);
@@ -472,7 +479,6 @@
           <div class="peer-name-stack">
             <div class="peer-name-line">
               <span class="peer-name-text">${escapeHtml(peer.name)}</span>
-              <span class="badge-net ${net}">${net === "lan" ? "LAN" : "Radmin"}</span>
               ${mutedBadge}
             </div>
             ${sub}
@@ -495,7 +501,6 @@
 
   function updatePeerRow(row, peer) {
     const klass = statusClass(peer.status);
-    const net = networkKey(peer);
     const online = peer.status === "Online";
 
     row.classList.toggle("selected", peer.ip === selectedIp);
@@ -516,12 +521,6 @@
       if (nameText && nameText.textContent !== peer.name) {
         nameText.textContent = peer.name;
       }
-    }
-
-    const badgeNet = row.querySelector(".badge-net");
-    if (badgeNet) {
-      badgeNet.className = `badge-net ${net}`;
-      badgeNet.textContent = net === "lan" ? "LAN" : "Radmin";
     }
 
     const nameLine = row.querySelector(".peer-name-line");
