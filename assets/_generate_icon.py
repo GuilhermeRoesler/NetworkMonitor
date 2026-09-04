@@ -144,8 +144,10 @@ def main() -> None:
     favicon_ico = ui_dir / "favicon.ico"
     favicon_png = ui_dir / "favicon.png"
     if ui_dir.is_dir():
-        favicon_ico.write_bytes(ico_path.read_bytes())
-        master.resize((32, 32), Image.Resampling.LANCZOS).save(favicon_png, format="PNG")
+        # PNG do painel/web: desenhar em 32px (não downscale de 512 — fica borrado na aba).
+        draw_icon(32).save(favicon_png, format="PNG")
+        # ICO multi-size para fallback; browsers modernos preferem favicon.svg.
+        write_ico(favicon_ico, [draw_icon(sz) for sz in (16, 32, 48)])
 
     # limpa artefato de teste se existir
     for junk in ("icon2.ico",):

@@ -51,7 +51,7 @@ Fechar janela = `hide()` se `close_hides` (modo bandeja). Encerrar vem da bandej
 
 - Taskbar (dev via `python.exe`): `ensure_win32_app_user_model_id()` (`Gui.NetworkMonitor`) **antes** de qualquer UI — sem isso o Windows usa o ícone do Python.
 - Janela: `webview.start(icon=…)` + `_apply_window_icon` (Form.Icon, `WM_SETICON`, `GCLP_HICON` via HWND de `window.native.Handle`).
-- Favicon do painel: `python/ui/favicon.ico` + `favicon.png` (gerados por `assets/_generate_icon.py`), linkados em `index.html`.
+- Favicon do painel: `favicon.svg` (preferido na web) + `favicon.png` 32px + `favicon.ico`; gerados/atualizados por `assets/_generate_icon.py` (PNG/ICO — desenhar no tamanho alvo, sem downscale de 512).
 
 ## Build
 
