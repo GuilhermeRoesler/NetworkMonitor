@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -166,6 +167,23 @@ class GuiApi:
         if not first_ip:
             return False
         return bool(move_peer(ip, first_ip))
+
+    def copy_text(self, text: str) -> bool:
+        """Copia texto para a área de transferência do Windows (`clip`)."""
+        value = str(text or "")
+        if not value:
+            return False
+        try:
+            subprocess.run(
+                ["clip"],
+                input=value.encode("utf-16"),
+                check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            return True
+        except Exception:
+            logging.exception("Falha ao copiar para a área de transferência")
+            return False
 
 
 class StatusWindow:

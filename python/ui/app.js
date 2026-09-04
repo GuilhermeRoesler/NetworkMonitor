@@ -11,18 +11,44 @@
     lan: "LAN",
   };
 
+  const RETENTION_LABELS = {
+    1: "1 dia",
+    3: "3 dias",
+    7: "7 dias",
+    14: "14 dias",
+    30: "30 dias",
+  };
+
+  const STORAGE = {
+    density: "nm-ui-density",
+    status: "nm-ui-status-filter",
+  };
+
   const els = {
+    app: document.querySelector(".app"),
     localIps: document.getElementById("local-ips"),
     chips: document.getElementById("summary-chips"),
     list: document.getElementById("peer-list"),
+    listScroll: document.getElementById("list-scroll"),
     empty: document.getElementById("empty-state"),
+    emptyTitle: document.getElementById("empty-title"),
+    emptyCopy: document.getElementById("empty-copy"),
     updatedAt: document.getElementById("updated-at"),
     btnRefresh: document.getElementById("btn-refresh"),
     btnTips: document.getElementById("btn-tips"),
     tipsPanel: document.getElementById("tips-panel"),
     chkNotifications: document.getElementById("chk-notifications"),
     chkHidden: document.getElementById("chk-hidden"),
-    selRetention: document.getElementById("sel-retention"),
+    ddRetention: document.getElementById("dd-retention"),
+    btnRetention: document.getElementById("btn-retention"),
+    retentionValue: document.getElementById("retention-value"),
+    retentionMenu: document.getElementById("retention-menu"),
+    search: document.getElementById("search-peers"),
+    btnClearSearch: document.getElementById("btn-clear-search"),
+    statusFilter: document.getElementById("status-filter"),
+    filterCount: document.getElementById("filter-count"),
+    btnClearFilters: document.getElementById("btn-clear-filters"),
+    densityGroup: document.querySelector(".density-group"),
     menu: document.getElementById("context-menu"),
   };
 
@@ -35,6 +61,12 @@
   let renameInput = null;
   let apiReady = false;
   let sortable = null;
+  let retentionDays = 7;
+  let freshTimer = null;
+  let statusFilter = "all";
+  let searchQuery = "";
+  let density = "comfortable";
+  let searchTimer = null;
 
   function statusClass(status) {
     return STATUS_CLASS[status] || "unknown";
@@ -217,16 +249,18 @@
     if (!row) {
       return;
     }
+    row.classList.add("is-expanded");
     const panel = document.createElement("div");
     panel.className = "peer-history";
     panel.dataset.forIp = ip;
     panel.innerHTML = buildHistoryHtml(data);
     row.insertAdjacentElement("afterend", panel);
+    updateScrollFades();
   }
 
   async function loadHistoryFor(ip) {
     const segments = (await apiCall("get_peer_history", ip)) || [];
-    const retention = snapshot?.history_retention_days || 7;
+    const retention = snapshot?.history_retention_days || retentionDays || 7;
     historyCache = { ip, segments, retention };
     insertHistoryPanel(ip, historyCache);
   }
@@ -236,6 +270,11 @@
       expandedIp = null;
       historyCache = null;
       removeHistoryPanel();
+      const row = els.list.querySelector(`.peer-row[data-ip="${CSS.escape(ip)}"]`);
+      if (row) {
+        row.classList.remove("is-expanded");
+      }
+      updateScrollFades();
       return;
     }
     expandedIp = ip;
@@ -271,6 +310,80 @@
     return window.pywebview.api[name](...args);
   }
 
+  function updateScrollFades() {
+    const scroller = els.list;
+    const wrap = els.listScroll;
+    if (!scroller || !wrap) {
+      return;
+    }
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    const top = scroller.scrollTop;
+    wrap.classList.toggle("can-scroll-up", top > 4);
+    wrap.classList.toggle("can-scroll-down", max > 4 && top < max - 4);
+  }
+
+  function setRetentionUi(days) {
+    retentionDays = Number(days) || 7;
+    const label = RETENTION_LABELS[retentionDays] || `${retentionDays} dias`;
+    if (els.retentionValue) {
+      els.retentionValue.textContent = label;
+    }
+    if (!els.retentionMenu) {
+      return;
+    }
+    for (const option of els.retentionMenu.querySelectorAll('[role="option"]')) {
+      const selected = Number(option.dataset.value) === retentionDays;
+      option.setAttribute("aria-selected", selected ? "true" : "false");
+    }
+  }
+
+  function closeRetentionDropdown() {
+    if (!els.ddRetention) {
+      return;
+    }
+    els.ddRetention.classList.remove("is-open");
+    els.btnRetention?.setAttribute("aria-expanded", "false");
+    els.retentionMenu?.classList.add("hidden");
+  }
+
+  function openRetentionDropdown() {
+    if (!els.ddRetention || !els.retentionMenu) {
+      return;
+    }
+    hideMenu();
+    setTipsOpen(false);
+    els.ddRetention.classList.add("is-open");
+    els.btnRetention.setAttribute("aria-expanded", "true");
+    els.retentionMenu.classList.remove("hidden");
+    const selected =
+      els.retentionMenu.querySelector('[aria-selected="true"]') ||
+      els.retentionMenu.querySelector('[role="option"]');
+    selected?.focus();
+  }
+
+  function toggleRetentionDropdown() {
+    if (els.ddRetention?.classList.contains("is-open")) {
+      closeRetentionDropdown();
+    } else {
+      openRetentionDropdown();
+    }
+  }
+
+  async function commitRetention(days) {
+    const next = Number(days);
+    closeRetentionDropdown();
+    if (!next || next === retentionDays) {
+      return;
+    }
+    setRetentionUi(next);
+    await apiCall("set_history_retention", next);
+    if (expandedIp) {
+      historyCache = null;
+      await loadHistoryFor(expandedIp);
+    }
+    await refreshNow();
+  }
+
   function renderChips(snap) {
     const chips = [];
     chips.push(
@@ -291,6 +404,7 @@
 
   function renderPeerRow(peer) {
     const selected = peer.ip === selectedIp ? " selected" : "";
+    const expanded = peer.ip === expandedIp ? " is-expanded" : "";
     const klass = statusClass(peer.status);
     const net = networkKey(peer);
     const mutedBadge =
@@ -311,7 +425,7 @@
       : "";
 
     return `
-      <div class="peer-row${selected}${onlineClass}" role="listitem" tabindex="0"
+      <div class="peer-row${selected}${expanded}${onlineClass}" role="listitem" tabindex="0"
            data-ip="${peer.ip}">
         <div class="peer-name">
           <span class="peer-avatar ${klass}" aria-hidden="true">${escapeHtml(initials(peer.name))}</span>
@@ -324,7 +438,16 @@
             ${sub}
           </div>
         </div>
-        <div class="peer-ip">${escapeHtml(peer.ip)}</div>
+        <div class="peer-ip">
+          <span class="peer-ip-text">${escapeHtml(peer.ip)}</span>
+          <button type="button" class="btn-copy-ip" data-copy-ip="${escapeHtml(peer.ip)}"
+                  title="Copiar IP" aria-label="Copiar IP ${escapeHtml(peer.ip)}">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path fill="currentColor"
+                    d="M5.75 2A1.75 1.75 0 0 0 4 3.75v7.5c0 .966.784 1.75 1.75 1.75h5.5A1.75 1.75 0 0 0 13 11.25v-7.5A1.75 1.75 0 0 0 11.25 2h-5.5ZM5.5 3.75a.25.25 0 0 1 .25-.25h5.5a.25.25 0 0 1 .25.25v7.5a.25.25 0 0 1-.25.25h-5.5a.25.25 0 0 1-.25-.25v-7.5ZM2 6.75c0-.966.784-1.75 1.75-1.75h.5V6.5h-.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h5.5a.25.25 0 0 0 .25-.25v-.5H10v.5A1.75 1.75 0 0 1 8.25 16h-5.5A1.75 1.75 0 0 1 1 14.25v-7.5Z"/>
+            </svg>
+          </button>
+        </div>
         <div class="peer-rtt ${rtt.klass}">${rtt.text}</div>
         <span class="status-pill ${klass}"><span class="dot"></span>${escapeHtml(peer.status)}</span>
       </div>`;
@@ -339,6 +462,11 @@
 
   function bindSortable() {
     destroySortable();
+    if (isViewFiltered()) {
+      els.list.classList.add("is-filtered");
+      return;
+    }
+    els.list.classList.remove("is-filtered");
     if (!window.Sortable || !els.list.querySelector(".peer-row")) {
       return;
     }
@@ -346,7 +474,7 @@
       animation: 200,
       easing: "cubic-bezier(0.22, 1, 0.36, 1)",
       draggable: ".peer-row",
-      filter: ".section-header, .rename-input, .peer-history",
+      filter: ".section-header, .rename-input, .peer-history, .btn-copy-ip",
       ghostClass: "peer-ghost",
       chosenClass: "peer-chosen",
       dragClass: "peer-drag",
@@ -357,6 +485,7 @@
       distance: 6,
       onStart() {
         hideMenu();
+        closeRetentionDropdown();
         setBusy(true);
       },
       async onEnd(evt) {
@@ -377,20 +506,99 @@
     });
   }
 
+  function isViewFiltered() {
+    return statusFilter !== "all" || Boolean(searchQuery.trim());
+  }
+
+  function matchesStatus(peer) {
+    const status = peer.status || "";
+    if (statusFilter === "all") {
+      return true;
+    }
+    if (statusFilter === "online") {
+      return status === "Online";
+    }
+    if (statusFilter === "offline") {
+      return status === "Offline";
+    }
+    return status !== "Online" && status !== "Offline";
+  }
+
+  function matchesSearch(peer) {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      return true;
+    }
+    const name = String(peer.name || "").toLowerCase();
+    const ip = String(peer.ip || "").toLowerCase();
+    const network = String(peer.network_name || "").toLowerCase();
+    return name.includes(q) || ip.includes(q) || network.includes(q);
+  }
+
+  function filterPeers(peers) {
+    return (peers || []).filter((peer) => matchesStatus(peer) && matchesSearch(peer));
+  }
+
+  function updateFilterChrome(total, shown) {
+    const filtered = isViewFiltered();
+    if (els.filterCount) {
+      if (!total) {
+        els.filterCount.textContent = "";
+      } else if (filtered) {
+        els.filterCount.textContent = `${shown} de ${total}`;
+      } else {
+        els.filterCount.textContent = `${total} peer${total === 1 ? "" : "s"}`;
+      }
+    }
+    els.btnClearFilters?.classList.toggle("hidden", !filtered);
+    els.btnClearSearch?.classList.toggle("hidden", !searchQuery.trim());
+  }
+
+  function showEmptyState(kind) {
+    els.empty.classList.remove("hidden");
+    if (kind === "filtered") {
+      els.emptyTitle.textContent = "Nenhum peer visível";
+      els.emptyCopy.innerHTML =
+        "Há dispositivos ocultos. Ative <strong>Ocultos</strong> na barra acima para exibi-los.";
+    } else if (kind === "search") {
+      els.emptyTitle.textContent = "Nenhum resultado";
+      els.emptyCopy.innerHTML =
+        "Nenhum peer corresponde à busca ou ao filtro. <button type=\"button\" class=\"btn-text\" id=\"empty-clear-filters\">Limpar filtros</button>";
+      const clearBtn = document.getElementById("empty-clear-filters");
+      clearBtn?.addEventListener("click", clearViewFilters);
+    } else {
+      els.emptyTitle.textContent = "Nenhum peer configurado";
+      els.emptyCopy.innerHTML =
+        "Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.";
+    }
+  }
+
   function renderPeers(snap) {
-    const peers = snap.peers || [];
-    els.empty.classList.toggle(
-      "hidden",
-      peers.length > 0 || snap.visible_count + snap.hidden_count > 0,
-    );
+    const allPeers = snap.peers || [];
+    const peers = filterPeers(allPeers);
+    const totalKnown = (snap.visible_count || 0) + (snap.hidden_count || 0);
+    updateFilterChrome(allPeers.length, peers.length);
+
+    if (allPeers.length === 0) {
+      destroySortable();
+      els.list.innerHTML = "";
+      if (totalKnown === 0) {
+        showEmptyState("empty");
+      } else {
+        showEmptyState("filtered");
+      }
+      updateScrollFades();
+      return;
+    }
+
     if (peers.length === 0) {
       destroySortable();
       els.list.innerHTML = "";
-      if (snap.visible_count + snap.hidden_count === 0) {
-        els.empty.classList.remove("hidden");
-      }
+      showEmptyState("search");
+      updateScrollFades();
       return;
     }
+
     els.empty.classList.add("hidden");
 
     // Headers só quando o tipo muda — preserva peer_order / DnD.
@@ -413,6 +621,87 @@
     els.list.innerHTML = parts.join("");
     bindSortable();
     restoreExpandedHistory();
+    requestAnimationFrame(updateScrollFades);
+  }
+
+  function setStatusFilter(next) {
+    const value = ["all", "online", "offline", "other"].includes(next) ? next : "all";
+    statusFilter = value;
+    try {
+      localStorage.setItem(STORAGE.status, value);
+    } catch {
+      /* ignore */
+    }
+    if (els.statusFilter) {
+      for (const btn of els.statusFilter.querySelectorAll("[data-status]")) {
+        btn.classList.toggle("is-active", btn.dataset.status === value);
+      }
+    }
+    if (snapshot) {
+      renderPeers(snapshot);
+    }
+  }
+
+  function setDensity(next) {
+    const value = next === "compact" ? "compact" : "comfortable";
+    density = value;
+    try {
+      localStorage.setItem(STORAGE.density, value);
+    } catch {
+      /* ignore */
+    }
+    els.app?.classList.toggle("density-compact", value === "compact");
+    if (els.densityGroup) {
+      for (const btn of els.densityGroup.querySelectorAll("[data-density]")) {
+        btn.classList.toggle("is-active", btn.dataset.density === value);
+      }
+    }
+    requestAnimationFrame(updateScrollFades);
+  }
+
+  function setSearchQuery(value, { render = true } = {}) {
+    searchQuery = String(value || "");
+    if (els.search && els.search.value !== searchQuery) {
+      els.search.value = searchQuery;
+    }
+    els.btnClearSearch?.classList.toggle("hidden", !searchQuery.trim());
+    if (render && snapshot) {
+      renderPeers(snapshot);
+    }
+  }
+
+  function clearViewFilters() {
+    setSearchQuery("", { render: false });
+    statusFilter = "all";
+    try {
+      localStorage.setItem(STORAGE.status, "all");
+    } catch {
+      /* ignore */
+    }
+    if (els.statusFilter) {
+      for (const btn of els.statusFilter.querySelectorAll("[data-status]")) {
+        btn.classList.toggle("is-active", btn.dataset.status === "all");
+      }
+    }
+    if (snapshot) {
+      renderPeers(snapshot);
+    } else {
+      updateFilterChrome(0, 0);
+    }
+  }
+
+  function loadUiPrefs() {
+    try {
+      const savedDensity = localStorage.getItem(STORAGE.density);
+      const savedStatus = localStorage.getItem(STORAGE.status);
+      setDensity(savedDensity === "compact" ? "compact" : "comfortable");
+      setStatusFilter(
+        ["all", "online", "offline", "other"].includes(savedStatus) ? savedStatus : "all",
+      );
+    } catch {
+      setDensity("comfortable");
+      setStatusFilter("all");
+    }
   }
 
   function escapeHtml(value) {
@@ -423,21 +712,83 @@
       .replaceAll('"', "&quot;");
   }
 
+  async function copyText(text) {
+    const value = String(text || "");
+    if (!value) {
+      return false;
+    }
+    const viaApi = await apiCall("copy_text", value);
+    if (viaApi === true) {
+      return true;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+      /* fallback abaixo */
+    }
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+
+  async function copyPeerIp(button) {
+    const ip = button?.dataset?.copyIp;
+    if (!ip) {
+      return;
+    }
+    const ok = await copyText(ip);
+    if (!ok) {
+      return;
+    }
+    button.classList.add("is-copied");
+    button.title = "IP copiado";
+    button.setAttribute("aria-label", `IP ${ip} copiado`);
+    window.setTimeout(() => {
+      button.classList.remove("is-copied");
+      button.title = "Copiar IP";
+      button.setAttribute("aria-label", `Copiar IP ${ip}`);
+    }, 1200);
+  }
+
+  function flashUpdatedAt() {
+    els.updatedAt.classList.add("is-fresh");
+    if (freshTimer) {
+      window.clearTimeout(freshTimer);
+    }
+    freshTimer = window.setTimeout(() => {
+      els.updatedAt.classList.remove("is-fresh");
+    }, 900);
+  }
+
   function applySnapshot(snap) {
     if (!snap || busy) {
       return;
     }
     snapshot = snap;
     els.localIps.textContent = snap.local_ips || "Nenhuma rede detectada";
-    els.updatedAt.textContent = snap.updated_at ? `Atualizado às ${snap.updated_at}` : "";
+    const nextStamp = snap.updated_at ? `Atualizado às ${snap.updated_at}` : "";
+    if (nextStamp && nextStamp !== els.updatedAt.textContent) {
+      flashUpdatedAt();
+    }
+    els.updatedAt.textContent = nextStamp;
     els.chkNotifications.checked = !!snap.notifications_enabled;
     els.chkHidden.checked = !!snap.show_hidden;
-    if (els.selRetention) {
-      const days = String(snap.history_retention_days || 7);
-      if (els.selRetention.value !== days) {
-        els.selRetention.value = days;
-      }
-    }
+    setRetentionUi(snap.history_retention_days || 7);
     renderChips(snap);
     renderPeers(snap);
   }
@@ -536,10 +887,12 @@
     if (!peer) {
       return;
     }
+    closeRetentionDropdown();
+    setTipsOpen(false);
     contextIp = ip;
     selectRow(ip);
     const items = [];
-    items.push({ label: "Renomear", action: "rename" });
+    items.push({ label: "Renomear", action: "rename", hint: "F2" });
     items.push({ label: "Ver histórico", action: "history" });
     items.push({ sep: true });
     items.push({ label: "Mover para o topo", action: "top" });
@@ -547,7 +900,7 @@
     if (peer.hidden) {
       items.push({ label: "Mostrar dispositivo", action: "show" });
     } else {
-      items.push({ label: "Ocultar dispositivo", action: "hide", danger: true });
+      items.push({ label: "Ocultar dispositivo", action: "hide", danger: true, hint: "Del" });
       if (peer.muted) {
         items.push({ label: "Ativar notificações", action: "unmute" });
       } else {
@@ -561,7 +914,10 @@
           return `<div class="sep"></div>`;
         }
         const danger = item.danger ? " danger" : "";
-        return `<button type="button" data-action="${item.action}" class="${danger.trim()}">${item.label}</button>`;
+        const hint = item.hint
+          ? `<span class="menu-hint">${escapeHtml(item.hint)}</span>`
+          : "";
+        return `<button type="button" role="menuitem" data-action="${item.action}" class="${danger.trim()}"><span class="menu-label">${item.label}</span>${hint}</button>`;
       })
       .join("");
 
@@ -621,7 +977,12 @@
 
   els.btnTips.addEventListener("click", (event) => {
     event.stopPropagation();
-    setTipsOpen(els.tipsPanel.classList.contains("hidden"));
+    const opening = els.tipsPanel.classList.contains("hidden");
+    if (opening) {
+      closeRetentionDropdown();
+      hideMenu();
+    }
+    setTipsOpen(opening);
   });
 
   els.btnRefresh.addEventListener("click", async () => {
@@ -645,20 +1006,120 @@
     await refreshNow();
   });
 
-  if (els.selRetention) {
-    els.selRetention.addEventListener("change", async () => {
-      const days = Number(els.selRetention.value);
-      await apiCall("set_history_retention", days);
-      if (expandedIp) {
-        historyCache = null;
-        await loadHistoryFor(expandedIp);
+  if (els.btnRetention && els.retentionMenu) {
+    els.btnRetention.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleRetentionDropdown();
+    });
+
+    els.retentionMenu.addEventListener("click", (event) => {
+      const option = event.target.closest('[role="option"]');
+      if (!option) {
+        return;
       }
-      await refreshNow();
+      event.stopPropagation();
+      commitRetention(option.dataset.value);
+    });
+
+    els.retentionMenu.addEventListener("keydown", (event) => {
+      const options = [...els.retentionMenu.querySelectorAll('[role="option"]')];
+      const current = document.activeElement;
+      const idx = options.indexOf(current);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRetentionDropdown();
+        els.btnRetention.focus();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        options[(idx + 1) % options.length]?.focus();
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        options[(idx - 1 + options.length) % options.length]?.focus();
+        return;
+      }
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (current?.dataset?.value) {
+          commitRetention(current.dataset.value);
+        }
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        options[0]?.focus();
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        options[options.length - 1]?.focus();
+      }
     });
   }
 
+  if (els.search) {
+    els.search.addEventListener("input", () => {
+      const value = els.search.value;
+      els.btnClearSearch?.classList.toggle("hidden", !value.trim());
+      if (searchTimer) {
+        window.clearTimeout(searchTimer);
+      }
+      searchTimer = window.setTimeout(() => {
+        setSearchQuery(value);
+      }, 120);
+    });
+    els.search.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (els.search.value) {
+          event.preventDefault();
+          event.stopPropagation();
+          setSearchQuery("");
+        } else {
+          els.search.blur();
+        }
+      }
+    });
+  }
+
+  els.btnClearSearch?.addEventListener("click", () => {
+    setSearchQuery("");
+    els.search?.focus();
+  });
+
+  els.btnClearFilters?.addEventListener("click", () => {
+    clearViewFilters();
+    els.search?.focus();
+  });
+
+  els.statusFilter?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-status]");
+    if (!btn) {
+      return;
+    }
+    setStatusFilter(btn.dataset.status);
+  });
+
+  els.densityGroup?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-density]");
+    if (!btn) {
+      return;
+    }
+    setDensity(btn.dataset.density);
+  });
+
+  els.list.addEventListener("scroll", updateScrollFades, { passive: true });
+  window.addEventListener("resize", updateScrollFades);
+
   els.list.addEventListener("click", (event) => {
     if (event.target.closest(".peer-history")) {
+      return;
+    }
+    const copyBtn = event.target.closest(".btn-copy-ip");
+    if (copyBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      copyPeerIp(copyBtn);
       return;
     }
     const row = event.target.closest(".peer-row");
@@ -680,7 +1141,7 @@
 
   els.list.addEventListener("dblclick", (event) => {
     const row = event.target.closest(".peer-row");
-    if (!row || event.target.closest("input")) {
+    if (!row || event.target.closest("input") || event.target.closest(".btn-copy-ip")) {
       return;
     }
     startRename(row.dataset.ip);
@@ -714,11 +1175,48 @@
     ) {
       setTipsOpen(false);
     }
+    if (
+      els.ddRetention &&
+      !els.ddRetention.contains(event.target)
+    ) {
+      closeRetentionDropdown();
+    }
   });
 
   document.addEventListener("keydown", async (event) => {
     if (renameInput) {
       return;
+    }
+    const tag = (event.target && event.target.tagName) || "";
+    const inField =
+      tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable;
+    if (
+      !inField &&
+      (event.key === "/" || (event.key === "f" && (event.ctrlKey || event.metaKey)))
+    ) {
+      event.preventDefault();
+      els.search?.focus();
+      els.search?.select();
+      return;
+    }
+    if (event.key === "Escape") {
+      if (els.ddRetention?.classList.contains("is-open")) {
+        closeRetentionDropdown();
+        return;
+      }
+      if (!els.tipsPanel.classList.contains("hidden")) {
+        setTipsOpen(false);
+        return;
+      }
+      if (!els.menu.classList.contains("hidden")) {
+        hideMenu();
+        return;
+      }
+      if (expandedIp) {
+        event.preventDefault();
+        toggleHistory(expandedIp);
+        return;
+      }
     }
     if (event.key === "F2" && selectedIp) {
       event.preventDefault();
@@ -732,9 +1230,13 @@
     }
   });
 
+  loadUiPrefs();
+
   window.addEventListener("pywebviewready", async () => {
     apiReady = true;
+    setRetentionUi(7);
     await refreshNow();
     setInterval(tick, 3000);
+    updateScrollFades();
   });
 })();
