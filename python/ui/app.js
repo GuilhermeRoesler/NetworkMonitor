@@ -385,21 +385,69 @@
   }
 
   function renderChips(snap) {
-    const chips = [];
-    chips.push(
-      `<span class="chip online"><span class="dot"></span>${snap.online_count} online</span>`,
+    const meters = [];
+    meters.push(
+      `<div class="meter online"><span class="meter-value">${snap.online_count}</span><span class="meter-label">online</span></div>`,
     );
-    chips.push(
-      `<span class="chip offline"><span class="dot"></span>${snap.offline_count} offline</span>`,
+    meters.push(
+      `<div class="meter offline"><span class="meter-value">${snap.offline_count}</span><span class="meter-label">offline</span></div>`,
     );
-    chips.push(`<span class="chip">${snap.visible_count} visíveis</span>`);
+    meters.push(
+      `<div class="meter"><span class="meter-value">${snap.visible_count}</span><span class="meter-label">visíveis</span></div>`,
+    );
     if (snap.hidden_count) {
-      chips.push(`<span class="chip">${snap.hidden_count} ocultos</span>`);
+      meters.push(
+        `<div class="meter"><span class="meter-value">${snap.hidden_count}</span><span class="meter-label">ocultos</span></div>`,
+      );
     }
     if (!snap.notifications_enabled) {
-      chips.push(`<span class="chip warn">notificações pausadas</span>`);
+      meters.push(
+        `<div class="meter warn"><span class="meter-value">Pausadas</span><span class="meter-label">notificações</span></div>`,
+      );
     }
-    els.chips.innerHTML = chips.join("");
+    els.chips.innerHTML = meters.join("");
+  }
+
+  function peerSubParts(peer) {
+    const net = networkKey(peer);
+    const parts = [];
+    if (peer.network_name && peer.network_name !== NETWORK_SECTION[net]) {
+      parts.push(String(peer.network_name));
+    }
+    if (peer.status !== "Online") {
+      const lastSeen = formatLastSeen(peer.last_seen);
+      if (lastSeen) {
+        parts.push(lastSeen);
+      }
+    }
+    return parts;
+  }
+
+  function peerListSignature(peers) {
+    const parts = [];
+    let lastKey = null;
+    for (const peer of peers) {
+      const key = networkKey(peer);
+      if (key !== lastKey) {
+        parts.push(`h:${key}`);
+        lastKey = key;
+      }
+      parts.push(`p:${peer.ip}`);
+    }
+    return parts.join("|");
+  }
+
+  function currentListSignature() {
+    const parts = [];
+    for (const child of els.list.children) {
+      if (child.classList.contains("section-header")) {
+        const key = child.classList.contains("lan") ? "lan" : "radmin";
+        parts.push(`h:${key}`);
+      } else if (child.classList.contains("peer-row") && child.dataset.ip) {
+        parts.push(`p:${child.dataset.ip}`);
+      }
+    }
+    return parts.join("|");
   }
 
   function renderPeerRow(peer) {
@@ -410,16 +458,8 @@
     const mutedBadge =
       peer.muted && !peer.hidden ? `<span class="badge-muted">Silenciado</span>` : "";
     const rtt = formatRtt(peer.status === "Online" ? peer.rtt_ms : null);
-    const lastSeen =
-      peer.status === "Online" ? "" : formatLastSeen(peer.last_seen);
     const onlineClass = peer.status === "Online" ? " is-online" : "";
-    const subParts = [];
-    if (peer.network_name && peer.network_name !== NETWORK_SECTION[net]) {
-      subParts.push(escapeHtml(peer.network_name));
-    }
-    if (lastSeen) {
-      subParts.push(escapeHtml(lastSeen));
-    }
+    const subParts = peerSubParts(peer).map(escapeHtml);
     const sub = subParts.length
       ? `<span class="peer-sub">${subParts.join(" · ")}</span>`
       : "";
@@ -451,6 +491,127 @@
         <div class="peer-rtt ${rtt.klass}">${rtt.text}</div>
         <span class="status-pill ${klass}"><span class="dot"></span>${escapeHtml(peer.status)}</span>
       </div>`;
+  }
+
+  function updatePeerRow(row, peer) {
+    const klass = statusClass(peer.status);
+    const net = networkKey(peer);
+    const online = peer.status === "Online";
+
+    row.classList.toggle("selected", peer.ip === selectedIp);
+    row.classList.toggle("is-expanded", peer.ip === expandedIp);
+    row.classList.toggle("is-online", online);
+
+    const avatar = row.querySelector(".peer-avatar");
+    if (avatar) {
+      avatar.className = `peer-avatar ${klass}`;
+      const nextInitials = initials(peer.name);
+      if (avatar.textContent !== nextInitials) {
+        avatar.textContent = nextInitials;
+      }
+    }
+
+    if (!row.querySelector(".rename-input")) {
+      const nameText = row.querySelector(".peer-name-text");
+      if (nameText && nameText.textContent !== peer.name) {
+        nameText.textContent = peer.name;
+      }
+    }
+
+    const badgeNet = row.querySelector(".badge-net");
+    if (badgeNet) {
+      badgeNet.className = `badge-net ${net}`;
+      badgeNet.textContent = net === "lan" ? "LAN" : "Radmin";
+    }
+
+    const nameLine = row.querySelector(".peer-name-line");
+    let mutedBadge = row.querySelector(".badge-muted");
+    if (peer.muted && !peer.hidden) {
+      if (!mutedBadge && nameLine) {
+        mutedBadge = document.createElement("span");
+        mutedBadge.className = "badge-muted";
+        mutedBadge.textContent = "Silenciado";
+        nameLine.appendChild(mutedBadge);
+      }
+    } else if (mutedBadge) {
+      mutedBadge.remove();
+    }
+
+    const stack = row.querySelector(".peer-name-stack");
+    const subParts = peerSubParts(peer);
+    let sub = row.querySelector(".peer-sub");
+    if (subParts.length) {
+      const text = subParts.join(" · ");
+      if (!sub && stack) {
+        sub = document.createElement("span");
+        sub.className = "peer-sub";
+        stack.appendChild(sub);
+      }
+      if (sub && sub.textContent !== text) {
+        sub.textContent = text;
+      }
+    } else if (sub) {
+      sub.remove();
+    }
+
+    const ipText = row.querySelector(".peer-ip-text");
+    if (ipText && ipText.textContent !== peer.ip) {
+      ipText.textContent = peer.ip;
+    }
+    const copyBtn = row.querySelector(".btn-copy-ip");
+    if (copyBtn && copyBtn.dataset.copyIp !== peer.ip) {
+      copyBtn.dataset.copyIp = peer.ip;
+      copyBtn.title = "Copiar IP";
+      copyBtn.setAttribute("aria-label", `Copiar IP ${peer.ip}`);
+    }
+
+    const rtt = formatRtt(online ? peer.rtt_ms : null);
+    const rttEl = row.querySelector(".peer-rtt");
+    if (rttEl) {
+      rttEl.className = `peer-rtt ${rtt.klass}`;
+      if (rttEl.textContent !== rtt.text) {
+        rttEl.textContent = rtt.text;
+      }
+    }
+
+    const pill = row.querySelector(".status-pill");
+    if (pill) {
+      pill.className = `status-pill ${klass}`;
+      let labelNode = null;
+      for (const node of pill.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          labelNode = node;
+          break;
+        }
+      }
+      if (labelNode) {
+        if (labelNode.textContent !== peer.status) {
+          labelNode.textContent = peer.status;
+        }
+      } else {
+        pill.appendChild(document.createTextNode(peer.status));
+      }
+    }
+  }
+
+  function patchPeerList(peers) {
+    for (const peer of peers) {
+      const row = els.list.querySelector(
+        `.peer-row[data-ip="${CSS.escape(peer.ip)}"]`,
+      );
+      if (row) {
+        updatePeerRow(row, peer);
+      }
+    }
+    for (const header of els.list.querySelectorAll(".section-header")) {
+      const key = header.classList.contains("lan") ? "lan" : "radmin";
+      const countEl = header.querySelector(".section-count");
+      if (countEl) {
+        countEl.textContent = String(
+          peers.filter((p) => networkKey(p) === key).length,
+        );
+      }
+    }
   }
 
   function destroySortable() {
@@ -601,6 +762,21 @@
 
     els.empty.classList.add("hidden");
 
+    const signature = peerListSignature(peers);
+    if (
+      signature === currentListSignature() &&
+      els.list.querySelector(".peer-row")
+    ) {
+      // Mesma ordem/IPs: atualiza campos no lugar (sem piscada).
+      patchPeerList(peers);
+      requestAnimationFrame(updateScrollFades);
+      return;
+    }
+
+    const previousIps = new Set(
+      [...els.list.querySelectorAll(".peer-row")].map((row) => row.dataset.ip),
+    );
+
     // Headers só quando o tipo muda — preserva peer_order / DnD.
     const parts = [];
     let lastKey = null;
@@ -619,6 +795,18 @@
       parts.push(renderPeerRow(peer));
     }
     els.list.innerHTML = parts.join("");
+
+    for (const row of els.list.querySelectorAll(".peer-row")) {
+      if (!previousIps.has(row.dataset.ip)) {
+        row.classList.add("is-entering");
+        row.addEventListener(
+          "animationend",
+          () => row.classList.remove("is-entering"),
+          { once: true },
+        );
+      }
+    }
+
     bindSortable();
     restoreExpandedHistory();
     requestAnimationFrame(updateScrollFades);
@@ -1232,9 +1420,25 @@
 
   loadUiPrefs();
 
+  function clearStartupFocus() {
+    const active = document.activeElement;
+    if (
+      active &&
+      active !== document.body &&
+      active !== document.documentElement &&
+      typeof active.blur === "function"
+    ) {
+      active.blur();
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", clearStartupFocus);
+  window.addEventListener("load", clearStartupFocus);
+
   window.addEventListener("pywebviewready", async () => {
     apiReady = true;
     setRetentionUi(7);
+    clearStartupFocus();
     await refreshNow();
     setInterval(tick, 3000);
     updateScrollFades();

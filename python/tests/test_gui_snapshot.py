@@ -13,6 +13,13 @@ def test_resolve_ui_dir_has_index() -> None:
     assert (ui_dir / "demo-api.js").is_file()
 
 
+def test_center_in_area() -> None:
+    from gui import center_in_area
+
+    assert center_in_area(200, 100, 0, 0, 1000, 800) == (400, 350)
+    assert center_in_area(1200, 900, 100, 50, 800, 600) == (100, 50)
+
+
 def test_status_label() -> None:
     assert status_label(True) == "Online"
     assert status_label(False) == "Offline"

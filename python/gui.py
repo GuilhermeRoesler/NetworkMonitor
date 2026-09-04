@@ -12,11 +12,67 @@ from pathlib import Path
 
 APP_NAME = "Network Monitor"
 REFRESH_MS = 3000
+WINDOW_WIDTH = 750
+WINDOW_HEIGHT = 850
 
 STATUS_ONLINE = "Online"
 STATUS_OFFLINE = "Offline"
 STATUS_UNKNOWN = "Desconhecido"
 STATUS_HIDDEN = "Oculto"
+
+
+def center_in_area(
+    width: int,
+    height: int,
+    left: int,
+    top: int,
+    area_w: int,
+    area_h: int,
+) -> tuple[int, int]:
+    """Origem (x, y) para centralizar width×height dentro da área útil."""
+    x = left + max(0, (area_w - width) // 2)
+    y = top + max(0, (area_h - height) // 2)
+    return x, y
+
+
+def screen_work_area() -> tuple[int, int, int, int]:
+    """Área útil (left, top, width, height) do monitor sob o cursor (fallback: primário)."""
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080
+    import ctypes
+    from ctypes import wintypes
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    user32 = ctypes.windll.user32
+    pt = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(pt)):
+        pt.x, pt.y = 0, 0
+    # MONITOR_DEFAULTTONEAREST = 2
+    monitor = user32.MonitorFromPoint(pt, 2)
+    info = MONITORINFO()
+    info.cbSize = ctypes.sizeof(MONITORINFO)
+    if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        work = info.rcWork
+        return work.left, work.top, work.right - work.left, work.bottom - work.top
+
+    # SPI_GETWORKAREA = 48
+    rect = wintypes.RECT()
+    if user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+        return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+
+    return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+
+def centered_window_origin(width: int, height: int) -> tuple[int, int]:
+    left, top, area_w, area_h = screen_work_area()
+    return center_in_area(width, height, left, top, area_w, area_h)
 
 
 def status_label(online: bool | None) -> str:
@@ -198,6 +254,7 @@ class StatusWindow:
         self._closed = threading.Event()
         self._closed.set()
         self._want_visible = False
+        self._created_hidden = True
         self._win_icon_handles: tuple[int, int] | None = None
         self.show_hidden: bool = False
 
@@ -207,6 +264,35 @@ class StatusWindow:
 
     def build_snapshot(self) -> dict:
         return build_snapshot(show_hidden=self.show_hidden)
+
+    def _center_window(self) -> None:
+        window = self._window
+        if window is None:
+            return
+        try:
+            width = int(getattr(window, "width", None) or WINDOW_WIDTH)
+            height = int(getattr(window, "height", None) or WINDOW_HEIGHT)
+            x, y = centered_window_origin(width, height)
+            window.move(x, y)
+        except Exception:
+            logging.debug("Não foi possível centralizar o painel", exc_info=True)
+
+    def _clear_startup_focus(self) -> None:
+        """Remove o autofoco do WebView no primeiro botão (outline estranho ao abrir).
+
+        Não chamar a partir de handlers de evento do pywebview na thread da UI —
+        `evaluate_js`/`move` nela causam deadlock.
+        """
+        window = self._window
+        if window is None:
+            return
+        try:
+            window.evaluate_js(
+                "document.activeElement && document.activeElement.blur && "
+                "document.activeElement.blur()"
+            )
+        except Exception:
+            logging.debug("Não foi possível limpar o foco inicial", exc_info=True)
 
     def show(self, *, close_hides: bool | None = None) -> None:
         """Exibe o painel. Em modo bandeja o loop já deve estar em `run_main_loop`."""
@@ -219,7 +305,10 @@ class StatusWindow:
             try:
                 window.show()
                 window.restore()
+                self._center_window()
                 self._apply_window_icon()
+                # Fora da thread da UI / handler shown — evita deadlock do pywebview.
+                threading.Timer(0.05, self._clear_startup_focus).start()
             except Exception:
                 logging.exception("Falha ao exibir o painel WebView")
 
@@ -266,22 +355,29 @@ class StatusWindow:
         with self._lock:
             self._close_hides = close_hides
             hidden = start_hidden and not self._want_visible
+            self._created_hidden = hidden
 
         ico = resolve_asset_path(ICON_ICO_NAME)
         self._api = GuiApi(self)
-        self._window = webview.create_window(
-            title=APP_NAME,
-            url=index.resolve().as_uri(),
-            width=680,
-            height=560,
-            min_size=(480, 360),
-            background_color="#0f1419",
-            js_api=self._api,
-            text_select=True,
-            hidden=hidden,
-        )
+        create_kwargs: dict = {
+            "title": APP_NAME,
+            "url": index.resolve().as_uri(),
+            "width": WINDOW_WIDTH,
+            "height": WINDOW_HEIGHT,
+            "min_size": (480, 360),
+            "background_color": "#0f1419",
+            "js_api": self._api,
+            "text_select": True,
+            "hidden": hidden,
+        }
+        # x/y só quando já vai aparecer — com hidden=True, move/posição pode forçar Show no WinForms.
+        if not hidden:
+            origin_x, origin_y = centered_window_origin(WINDOW_WIDTH, WINDOW_HEIGHT)
+            create_kwargs["x"] = origin_x
+            create_kwargs["y"] = origin_y
+        self._window = webview.create_window(**create_kwargs)
         self._window.events.closing += self._on_closing
-        self._window.events.shown += self._apply_window_icon
+        self._window.events.shown += self._on_shown
         self._closed.clear()
         self._loop_running.set()
 
@@ -301,8 +397,14 @@ class StatusWindow:
             self._window = None
             self._api = None
             self._want_visible = False
+            self._created_hidden = True
             self._loop_running.clear()
             self._closed.set()
+
+    def _on_shown(self) -> None:
+        # Só ícone aqui. move()/hide()/evaluate_js() neste handler travam o WebView no Windows
+        # (API do pywebview não é reentrante na thread da UI — ver pywebview#1699).
+        self._apply_window_icon()
 
     def _on_closing(self) -> bool:
         if self._close_hides and self._window is not None:

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Network Monitor</title>
+    <title>Network Monitor — Painel</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
     <link rel="icon" href="favicon.ico" sizes="48x48" />
@@ -25,96 +25,206 @@
     </div>
     <div class="app-bg" aria-hidden="true"></div>
     <div class="app">
-      <header class="header">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="20" cy="20" r="18.5" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.25" />
-              <circle cx="20" cy="20" r="12.5" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.25" />
-              <circle cx="20" cy="20" r="6.5" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.25" />
-              <circle class="brand-core" cx="20" cy="20" r="2.4" fill="currentColor" />
-              <path
-                class="brand-sweep"
-                d="M20 20 L20 3.5 A16.5 16.5 0 0 1 34.8 28.5 Z"
-                fill="currentColor"
-                fill-opacity="0.18"
-              />
-              <path d="M20 20 L34.8 28.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-            </svg>
+      <div class="panel">
+        <header class="panel-chrome">
+          <div class="panel-titlebar">
+            <div class="brand">
+              <div class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="20" cy="20" r="18.5" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.25" />
+                  <circle cx="20" cy="20" r="12.5" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.25" />
+                  <circle cx="20" cy="20" r="6.5" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.25" />
+                  <circle class="brand-core" cx="20" cy="20" r="2.4" fill="currentColor" />
+                  <path
+                    class="brand-sweep"
+                    d="M20 20 L20 3.5 A16.5 16.5 0 0 1 34.8 28.5 Z"
+                    fill="currentColor"
+                    fill-opacity="0.18"
+                  />
+                  <path d="M20 20 L34.8 28.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                </svg>
+              </div>
+              <div class="brand-copy">
+                <p class="brand-kicker">Painel de status</p>
+                <h1>Network Monitor</h1>
+                <p id="local-ips" class="muted brand-meta">Detectando redes…</p>
+              </div>
+            </div>
+            <div class="panel-live" title="Monitoramento ativo" aria-live="polite">
+              <span class="live-pulse" aria-hidden="true"></span>
+              <span class="live-label">Ao vivo</span>
+            </div>
           </div>
-          <div class="brand-copy">
-            <p class="brand-kicker">Ops · Rede local</p>
-            <h1>Network Monitor</h1>
-            <p id="local-ips" class="muted brand-meta">Detectando redes…</p>
-          </div>
-        </div>
-        <div id="summary-chips" class="chips" aria-live="polite"></div>
-      </header>
+          <div id="summary-chips" class="panel-meters" aria-live="polite"></div>
+        </header>
 
-      <div class="toolbar">
-        <div class="toolbar-group">
-          <button type="button" id="btn-refresh" class="btn btn-ghost" title="Atualizar agora">
-            <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8h2a6 6 0 0 1 9.9-4.55L9 6h7V0l-2.35 2.35ZM14 8a6 6 0 0 1-9.9 4.55L7 10H0v6l2.35-2.35A7.96 7.96 0 0 0 8 16c4.42 0 8-3.58 8-8h-2z"
-              />
-            </svg>
-            Atualizar
-          </button>
-        </div>
-
-        <div class="toolbar-divider" aria-hidden="true"></div>
-
-        <div class="toolbar-group toolbar-filters">
-          <label class="switch" title="Toasts ao mudar status">
-            <input type="checkbox" id="chk-notifications" />
-            <span class="switch-ui" aria-hidden="true"></span>
-            <span class="switch-label">Notificações</span>
-          </label>
-          <label class="switch" title="Exibir peers ocultos na lista">
-            <input type="checkbox" id="chk-hidden" />
-            <span class="switch-ui" aria-hidden="true"></span>
-            <span class="switch-label">Ocultos</span>
-          </label>
-          <div class="field-inline">
-            <span class="field-label" id="lbl-retention">Histórico</span>
-            <div class="dropdown" id="dd-retention">
-              <button
-                type="button"
-                class="dropdown-trigger"
-                id="btn-retention"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-                aria-labelledby="lbl-retention btn-retention"
-              >
-                <span class="dropdown-value" id="retention-value">7 dias</span>
-                <svg class="dropdown-chevron" viewBox="0 0 12 12" aria-hidden="true">
+        <div class="panel-deck">
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <button type="button" id="btn-refresh" class="btn btn-ghost" title="Atualizar agora">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
                   <path
                     fill="currentColor"
-                    d="M2.2 4.2a.75.75 0 0 1 1.06 0L6 6.94l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L2.2 5.26a.75.75 0 0 1 0-1.06z"
+                    d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8h2a6 6 0 0 1 9.9-4.55L9 6h7V0l-2.35 2.35ZM14 8a6 6 0 0 1-9.9 4.55L7 10H0v6l2.35-2.35A7.96 7.96 0 0 0 8 16c4.42 0 8-3.58 8-8h-2z"
                   />
                 </svg>
+                Atualizar
               </button>
-              <ul
-                class="dropdown-menu hidden"
-                id="retention-menu"
-                role="listbox"
-                aria-labelledby="lbl-retention"
-                tabindex="-1"
-              >
-                <li role="option" data-value="1" tabindex="-1">1 dia</li>
-                <li role="option" data-value="3" tabindex="-1">3 dias</li>
-                <li role="option" data-value="7" tabindex="-1" aria-selected="true">7 dias</li>
-                <li role="option" data-value="14" tabindex="-1">14 dias</li>
-                <li role="option" data-value="30" tabindex="-1">30 dias</li>
-              </ul>
+            </div>
+
+            <div class="toolbar-divider" aria-hidden="true"></div>
+
+            <div class="toolbar-group toolbar-filters">
+              <label class="switch" title="Toasts ao mudar status">
+                <input type="checkbox" id="chk-notifications" />
+                <span class="switch-ui" aria-hidden="true"></span>
+                <span class="switch-label">Notificações</span>
+              </label>
+              <label class="switch" title="Exibir peers ocultos na lista">
+                <input type="checkbox" id="chk-hidden" />
+                <span class="switch-ui" aria-hidden="true"></span>
+                <span class="switch-label">Ocultos</span>
+              </label>
+              <div class="field-inline">
+                <span class="field-label" id="lbl-retention">Histórico</span>
+                <div class="dropdown" id="dd-retention">
+                  <button
+                    type="button"
+                    class="dropdown-trigger"
+                    id="btn-retention"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-labelledby="lbl-retention btn-retention"
+                  >
+                    <span class="dropdown-value" id="retention-value">7 dias</span>
+                    <svg class="dropdown-chevron" viewBox="0 0 12 12" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M2.2 4.2a.75.75 0 0 1 1.06 0L6 6.94l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L2.2 5.26a.75.75 0 0 1 0-1.06z"
+                      />
+                    </svg>
+                  </button>
+                  <ul
+                    class="dropdown-menu hidden"
+                    id="retention-menu"
+                    role="listbox"
+                    aria-labelledby="lbl-retention"
+                    tabindex="-1"
+                  >
+                    <li role="option" data-value="1" tabindex="-1">1 dia</li>
+                    <li role="option" data-value="3" tabindex="-1">3 dias</li>
+                    <li role="option" data-value="7" tabindex="-1" aria-selected="true">7 dias</li>
+                    <li role="option" data-value="14" tabindex="-1">14 dias</li>
+                    <li role="option" data-value="30" tabindex="-1">30 dias</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <label class="search-field" for="search-peers">
+              <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M11.5 10.4a5.5 5.5 0 1 0-1.1 1.1l3.05 3.05a.75.75 0 1 0 1.06-1.06L11.5 10.4ZM6.75 10.5a3.75 3.75 0 1 1 0-7.5 3.75 3.75 0 0 1 0 7.5Z"
+                />
+              </svg>
+              <input
+                type="search"
+                id="search-peers"
+                placeholder="Buscar nome ou IP…"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Buscar por nome ou IP"
+              />
+              <button type="button" id="btn-clear-search" class="search-clear hidden" title="Limpar busca" aria-label="Limpar busca">
+                ×
+              </button>
+            </label>
+
+            <div class="seg-group" id="status-filter" role="group" aria-label="Filtrar por status">
+              <button type="button" class="seg is-active" data-status="all">Todos</button>
+              <button type="button" class="seg" data-status="online">
+                <span class="seg-dot online" aria-hidden="true"></span>Online
+              </button>
+              <button type="button" class="seg" data-status="offline">
+                <span class="seg-dot offline" aria-hidden="true"></span>Offline
+              </button>
+              <button type="button" class="seg" data-status="other">Outros</button>
+            </div>
+
+            <div class="filter-meta">
+              <span id="filter-count" class="filter-count muted" aria-live="polite"></span>
+              <button type="button" id="btn-clear-filters" class="btn-text hidden">Limpar filtros</button>
+              <div class="seg-group density-group" role="group" aria-label="Densidade da lista">
+                <button
+                  type="button"
+                  class="seg seg-icon is-active"
+                  data-density="comfortable"
+                  title="Densidade confortável"
+                  aria-label="Densidade confortável"
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="3.5" rx="1" fill="currentColor" />
+                    <rect x="2" y="7.25" width="12" height="3.5" rx="1" fill="currentColor" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="seg seg-icon"
+                  data-density="compact"
+                  title="Densidade compacta"
+                  aria-label="Densidade compacta"
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <rect x="2" y="2" width="12" height="2.2" rx="0.8" fill="currentColor" />
+                    <rect x="2" y="6.4" width="12" height="2.2" rx="0.8" fill="currentColor" />
+                    <rect x="2" y="10.8" width="12" height="2.2" rx="0.8" fill="currentColor" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="toolbar-right">
-          <span id="updated-at" class="muted updated-at"></span>
+        <div class="panel-board">
+          <div class="table-wrap">
+            <div class="table-head" role="row">
+              <span>Nome</span>
+              <span>IP</span>
+              <span>Latência</span>
+              <span>Status</span>
+            </div>
+            <div class="list-scroll" id="list-scroll">
+              <div id="peer-list" class="peer-list" role="list"></div>
+              <div id="empty-state" class="empty-state hidden">
+                <div class="empty-art" aria-hidden="true">
+                  <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-opacity="0.15" stroke-width="1.5" />
+                    <circle cx="48" cy="48" r="30" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5" />
+                    <circle cx="48" cy="48" r="16" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+                    <circle cx="48" cy="48" r="4" fill="currentColor" fill-opacity="0.7" />
+                    <path d="M48 48 L72 28" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                    <circle cx="72" cy="28" r="3" fill="currentColor" />
+                  </svg>
+                </div>
+                <p class="empty-title" id="empty-title">Nenhum peer configurado</p>
+                <p class="muted empty-copy" id="empty-copy">
+                  Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.
+                </p>
+              </div>
+              <div class="scroll-fade scroll-fade-top" aria-hidden="true"></div>
+              <div class="scroll-fade scroll-fade-bottom" aria-hidden="true"></div>
+            </div>
+          </div>
+        </div>
+
+        <footer class="panel-status">
+          <div class="panel-status-left">
+            <span class="status-rail-label">Sincronização</span>
+            <span id="updated-at" class="muted updated-at">Aguardando…</span>
+          </div>
           <div class="tips-wrap">
             <button
               type="button"
@@ -138,102 +248,7 @@
               </ul>
             </div>
           </div>
-        </div>
-      </div>
-
-      <div class="filter-bar">
-        <label class="search-field" for="search-peers">
-          <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M11.5 10.4a5.5 5.5 0 1 0-1.1 1.1l3.05 3.05a.75.75 0 1 0 1.06-1.06L11.5 10.4ZM6.75 10.5a3.75 3.75 0 1 1 0-7.5 3.75 3.75 0 0 1 0 7.5Z"
-            />
-          </svg>
-          <input
-            type="search"
-            id="search-peers"
-            placeholder="Buscar nome ou IP…"
-            autocomplete="off"
-            spellcheck="false"
-            aria-label="Buscar por nome ou IP"
-          />
-          <button type="button" id="btn-clear-search" class="search-clear hidden" title="Limpar busca" aria-label="Limpar busca">
-            ×
-          </button>
-        </label>
-
-        <div class="seg-group" id="status-filter" role="group" aria-label="Filtrar por status">
-          <button type="button" class="seg is-active" data-status="all">Todos</button>
-          <button type="button" class="seg" data-status="online">
-            <span class="seg-dot online" aria-hidden="true"></span>Online
-          </button>
-          <button type="button" class="seg" data-status="offline">
-            <span class="seg-dot offline" aria-hidden="true"></span>Offline
-          </button>
-          <button type="button" class="seg" data-status="other">Outros</button>
-        </div>
-
-        <div class="filter-meta">
-          <span id="filter-count" class="filter-count muted" aria-live="polite"></span>
-          <button type="button" id="btn-clear-filters" class="btn-text hidden">Limpar filtros</button>
-          <div class="seg-group density-group" role="group" aria-label="Densidade da lista">
-            <button
-              type="button"
-              class="seg seg-icon is-active"
-              data-density="comfortable"
-              title="Densidade confortável"
-              aria-label="Densidade confortável"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="2" y="2" width="12" height="3.5" rx="1" fill="currentColor" />
-                <rect x="2" y="7.25" width="12" height="3.5" rx="1" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="seg seg-icon"
-              data-density="compact"
-              title="Densidade compacta"
-              aria-label="Densidade compacta"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="2" y="2" width="12" height="2.2" rx="0.8" fill="currentColor" />
-                <rect x="2" y="6.4" width="12" height="2.2" rx="0.8" fill="currentColor" />
-                <rect x="2" y="10.8" width="12" height="2.2" rx="0.8" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="table-wrap">
-        <div class="table-head" role="row">
-          <span>Nome</span>
-          <span>IP</span>
-          <span>Latência</span>
-          <span>Status</span>
-        </div>
-        <div class="list-scroll" id="list-scroll">
-          <div id="peer-list" class="peer-list" role="list"></div>
-          <div id="empty-state" class="empty-state hidden">
-            <div class="empty-art" aria-hidden="true">
-              <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-opacity="0.15" stroke-width="1.5" />
-                <circle cx="48" cy="48" r="30" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.5" />
-                <circle cx="48" cy="48" r="16" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
-                <circle cx="48" cy="48" r="4" fill="currentColor" fill-opacity="0.7" />
-                <path d="M48 48 L72 28" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                <circle cx="72" cy="28" r="3" fill="currentColor" />
-              </svg>
-            </div>
-            <p class="empty-title" id="empty-title">Nenhum peer configurado</p>
-            <p class="muted empty-copy" id="empty-copy">
-              Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.
-            </p>
-          </div>
-          <div class="scroll-fade scroll-fade-top" aria-hidden="true"></div>
-          <div class="scroll-fade scroll-fade-bottom" aria-hidden="true"></div>
-        </div>
+        </footer>
       </div>
     </div>
 
