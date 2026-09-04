@@ -1,8 +1,10 @@
 # Network Monitor
 
-Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos na sub-rede `/24` e notifica quando alguém fica online ou offline.
+Monitor de peers **Radmin VPN** e **LAN** no Windows. Faz ping periódico, descobre dispositivos na sub-rede `/24`, notifica quando alguém fica online ou offline e registra histórico de presença.
 
 ## Demo do painel
+
+![Painel Network Monitor](docs/screenshots/demo.png)
 
 A UI em `python/ui/` roda no browser com dados fictícios (sem ping real):
 
@@ -27,7 +29,7 @@ A UI em `python/ui/` roda no browser com dados fictícios (sem ping real):
 
 Nas [Releases](../../releases) baixe `NetworkMonitor-Setup-v*.exe`, execute o instalador (Program Files) e abra pelo menu Iniciar.
 
-Configuração e logs ficam em `%LOCALAPPDATA%\NetworkMonitor\` (`peers.json`, `state.json`, `monitor.log`). A desinstalação não remove esses arquivos.
+Configuração, histórico e logs ficam em `%LOCALAPPDATA%\NetworkMonitor\` (`peers.json`, `state.json`, `history.json`, `monitor.log`). A desinstalação não remove esses arquivos.
 
 Também há zips portáteis (Python e C++) na mesma release.
 
@@ -45,10 +47,14 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | Comando | Descrição |
 |---------|-----------|
 | `.\run.bat` | Bandeja + monitor (Python) |
+| `.\python\run.bat --gui` | Monitor + painel (sem bandeja) |
+| `.\python\run.bat --run` | Monitor só no console |
 | `.\python\run.bat --status` | Status atual |
+| `.\python\run.bat --scan` | Escaneia sub-rede Radmin |
+| `.\python\run.bat --scan-lan` | Escaneia sub-rede LAN |
 | `.\python\run.bat --scan-all` | Escaneia Radmin e LAN |
-| `.\python\run.bat --gui` | Monitor + painel |
 | `.\python\run.bat --install` | Atalho na pasta Startup |
+| `.\python\run.bat --uninstall` | Remove o atalho Startup |
 | `.\cpp\run.bat` | Bandeja + monitor (C++ Win32, compila se preciso) |
 | `.\cpp\run.bat --gui` | Monitor + painel Win32 |
 | `.\cpp\run.bat --status` | Mesmo status via C++ |
@@ -59,13 +65,14 @@ Isso abre o ícone na bandeja e inicia o monitor. Clique duas vezes no ícone pa
 | Recurso | Python | C++ |
 |---------|--------|-----|
 | Ping / descoberta / loop | sim | sim |
-| `peers.json` / `state.json` | sim | sim |
+| `peers.json` / `state.json` / `history.json` | sim | sim |
 | Toast / bandeja / painel | sim | sim |
 | Renomear / ocultar / silenciar / reorder | sim | sim |
+| Histórico de presença (retenção) | sim | sim |
 | Startup do Windows | sim | não |
 | Instalador Inno Setup | sim | não |
 
-Em desenvolvimento, config/estado/log ficam na **raiz do repositório**. Na build instalada/empacotada, em `%LOCALAPPDATA%\NetworkMonitor` (ou ao lado do `.exe` se já houver `peers.json` — modo portátil).
+Em desenvolvimento, config/estado/histórico/log ficam na **raiz do repositório**. Na build instalada/empacotada, em `%LOCALAPPDATA%\NetworkMonitor` (ou ao lado do `.exe` se já houver `peers.json` — modo portátil).
 
 ## Configuração
 
@@ -73,12 +80,17 @@ Na primeira execução é gerado `peers.json`. Campos principais:
 
 - `interval_seconds` — intervalo entre pings (padrão 15)
 - `scan_interval_seconds` — intervalo de auto-descoberta (padrão 300)
+- `auto_discover` — fallback global de descoberta automática (padrão `true`)
 - `notifications_enabled` — toasts globais
+- `history_retention_days` — retenção do histórico (padrão 7, entre 1 e 90)
+- `peer_order` — ordem de exibição dos IPs (visíveis antes dos ocultos)
 - `networks[]` — redes `radmin` e/ou `lan`, cada uma com `peers`
 
 Por peer: `hidden` (não monitora) e `muted` (monitora sem notificar).
 
-`peers.json`, `state.json` e `monitor.log` são locais — não vão para o git.
+`history.json` guarda segmentos online por IP (`start` / `end`; `end: null` = sessão aberta). No painel Python, o 2º clique no peer selecionado abre o histórico.
+
+`peers.json`, `state.json`, `history.json` e `monitor.log` são locais — não vão para o git.
 
 Na versão C++ com UI Win32:
 
