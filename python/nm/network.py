@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import ctypes
 import ipaddress
+import json
+import logging
 import re
 import socket
 import struct
 import subprocess
+import threading
 import winreg
+from ctypes import wintypes
 from dataclasses import dataclass
 
 from nm.win32_process import hidden_run
+
+# Varreduras L2/ICMP grandes demais (ex.: /16) são limitadas a /24 em torno do host.
+MIN_SCAN_PREFIXLEN = 22
+DEFAULT_PREFIXLEN = 24
 
 RADMIN_REG_PATHS = (
     r"SOFTWARE\WOW6432Node\Famatech\RadminVPN\1.0",
@@ -71,6 +80,7 @@ class LocalInterface:
     name: str
     ip: str
     network_type: str  # lan | radmin | tailscale | wireguard
+    prefixlen: int = DEFAULT_PREFIXLEN
 
     @property
     def id(self) -> str:
@@ -79,6 +89,47 @@ class LocalInterface:
     @property
     def label(self) -> str:
         return NETWORK_TYPE_LABELS.get(self.network_type, self.network_type)
+
+
+_iphlpapi = ctypes.WinDLL("iphlpapi")
+_iphlpapi.SendARP.restype = wintypes.DWORD
+_iphlpapi.SendARP.argtypes = [
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.LPVOID,
+    ctypes.POINTER(wintypes.ULONG),
+]
+
+
+def mask_to_prefixlen(mask: str) -> int:
+    """Converte máscara pontilhada (ex.: 255.255.255.0) em prefixlen."""
+    try:
+        return ipaddress.IPv4Network(f"0.0.0.0/{mask}").prefixlen
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError, ValueError):
+        return DEFAULT_PREFIXLEN
+
+
+def effective_scan_prefixlen(prefixlen: int) -> int:
+    """Limita redes amplas para não varrer milhares de hosts."""
+    plen = max(0, min(32, int(prefixlen)))
+    if plen < MIN_SCAN_PREFIXLEN:
+        return DEFAULT_PREFIXLEN
+    return plen
+
+
+def send_arp(dest_ip: str, src_ip: str = "0.0.0.0") -> bool:
+    """Resolve L2 via ``SendARP`` (Windows). Sucesso ⇒ host ativo no enlace."""
+    try:
+        dest = struct.unpack("=I", socket.inet_aton(dest_ip))[0]
+        src = struct.unpack("=I", socket.inet_aton(src_ip))[0]
+    except OSError:
+        return False
+    mac = ctypes.create_string_buffer(6)
+    length = wintypes.ULONG(6)
+    try:
+        return int(_iphlpapi.SendARP(dest, src, mac, ctypes.byref(length))) == 0
+    except (OSError, ValueError, ctypes.ArgumentError):
+        return False
 
 
 def dword_to_ip(value: int) -> str:
@@ -158,32 +209,63 @@ def parse_ipconfig_interfaces(text: str) -> list[LocalInterface]:
     current_adapter = ""
     results: list[LocalInterface] = []
     seen_ips: set[str] = set()
+    pending_ip: str | None = None
+    pending_prefix = DEFAULT_PREFIXLEN
+
+    def _flush_pending() -> None:
+        nonlocal pending_ip, pending_prefix
+        if not pending_ip or not current_adapter:
+            pending_ip = None
+            pending_prefix = DEFAULT_PREFIXLEN
+            return
+        if pending_ip in seen_ips or pending_ip.startswith(LAN_SKIP_PREFIXES):
+            pending_ip = None
+            pending_prefix = DEFAULT_PREFIXLEN
+            return
+        network_type = classify_adapter(current_adapter, pending_ip)
+        if network_type is None:
+            pending_ip = None
+            pending_prefix = DEFAULT_PREFIXLEN
+            return
+        seen_ips.add(pending_ip)
+        results.append(
+            LocalInterface(
+                name=current_adapter,
+                ip=pending_ip,
+                network_type=network_type,
+                prefixlen=pending_prefix,
+            )
+        )
+        pending_ip = None
+        pending_prefix = DEFAULT_PREFIXLEN
 
     for line in text.splitlines():
         if line and not line.startswith((" ", "\t")):
+            _flush_pending()
             current_adapter = line.strip().rstrip(":")
             continue
 
         if not current_adapter or _should_skip_adapter(current_adapter):
             continue
 
+        mask_match = re.search(
+            r"(?:Subnet Mask|M[aá]scara(?: de Sub-rede)?)\s*(?:\.|\s)*:\s*([\d.]+)",
+            line,
+            re.IGNORECASE,
+        )
+        if mask_match and pending_ip:
+            pending_prefix = mask_to_prefixlen(mask_match.group(1))
+            continue
+
         match = re.search(r"IPv4[^:]*:\s*([\d.]+)", line)
         if not match:
             continue
 
-        candidate = match.group(1)
-        if candidate.startswith(LAN_SKIP_PREFIXES) or candidate in seen_ips:
-            continue
+        _flush_pending()
+        pending_ip = match.group(1)
+        pending_prefix = DEFAULT_PREFIXLEN
 
-        network_type = classify_adapter(current_adapter, candidate)
-        if network_type is None:
-            continue
-
-        seen_ips.add(candidate)
-        results.append(
-            LocalInterface(name=current_adapter, ip=candidate, network_type=network_type)
-        )
-
+    _flush_pending()
     return results
 
 
@@ -222,7 +304,12 @@ def list_local_interfaces() -> list[LocalInterface]:
     if radmin_ip and not any(iface.ip == radmin_ip for iface in interfaces):
         interfaces.insert(
             0,
-            LocalInterface(name="Radmin VPN", ip=radmin_ip, network_type="radmin"),
+            LocalInterface(
+                name="Radmin VPN",
+                ip=radmin_ip,
+                network_type="radmin",
+                prefixlen=8,
+            ),
         )
 
     return interfaces
@@ -350,23 +437,39 @@ def adapters_snapshot(monitored_adapters: dict[str, bool] | None = None) -> list
                 "network_type": iface.network_type,
                 "label": iface.label,
                 "enabled": is_adapter_monitored(iface, monitored),
-                "subnet": str(subnet_for_ip(iface.ip)),
+                "subnet": str(scan_subnet_for_ip(iface.ip, iface.prefixlen)),
+                "prefixlen": iface.prefixlen,
             }
         )
     return rows
 
 
-def subnet_for_ip(ip: str) -> ipaddress.IPv4Network:
+def prefixlen_for_local_ip(ip: str) -> int:
+    for iface in list_local_interfaces():
+        if iface.ip == ip:
+            return iface.prefixlen
+    return DEFAULT_PREFIXLEN
+
+
+def subnet_for_ip(ip: str, prefixlen: int | None = None) -> ipaddress.IPv4Network:
+    """Sub-rede do host (máscara informada ou /24 por omissão)."""
+    plen = DEFAULT_PREFIXLEN if prefixlen is None else int(prefixlen)
     address = ipaddress.IPv4Address(ip)
-    return ipaddress.IPv4Network(f"{address}/24", strict=False)
+    return ipaddress.IPv4Network(f"{address}/{plen}", strict=False)
+
+
+def scan_subnet_for_ip(ip: str, prefixlen: int | None = None) -> ipaddress.IPv4Network:
+    """Sub-rede efetiva para varredura (com teto em redes amplas)."""
+    plen = prefixlen if prefixlen is not None else prefixlen_for_local_ip(ip)
+    return subnet_for_ip(ip, effective_scan_prefixlen(plen))
 
 
 def unique_scan_ips(local_ips: list[str]) -> list[str]:
-    """Um IP representante por sub-rede /24 (evita scan duplicado)."""
+    """Um IP representante por sub-rede de varredura (evita scan duplicado)."""
     seen_subnets: set[str] = set()
     result: list[str] = []
     for ip in local_ips:
-        key = str(subnet_for_ip(ip))
+        key = str(scan_subnet_for_ip(ip))
         if key in seen_subnets:
             continue
         seen_subnets.add(key)
@@ -380,9 +483,164 @@ def skip_ips_for_network(network_type: str, local_ip: str) -> set[str]:
         skipped |= RADMIN_GATEWAYS
         skipped.add(RADMIN_BROADCAST)
     else:
-        network = subnet_for_ip(local_ip)
+        network = scan_subnet_for_ip(local_ip)
         skipped.add(str(network.network_address + 1))
     return skipped
+
+
+def subnet_host_candidates(
+    local_ip: str,
+    *,
+    prefixlen: int | None = None,
+    excluded: set[str] | None = None,
+) -> list[str]:
+    """Hosts da sub-rede efetiva de varredura, sem o próprio IP / exclusões."""
+    network = scan_subnet_for_ip(local_ip, prefixlen)
+    skip = set(excluded or ())
+    skip.add(local_ip)
+    return [str(host) for host in network.hosts() if str(host) not in skip]
+
+
+def arp_probe_hosts(
+    candidates: list[str],
+    *,
+    src_ip: str = "0.0.0.0",
+    max_workers: int = 64,
+    stop_event: threading.Event | None = None,
+) -> list[str]:
+    """Varredura ARP ativa (SendARP) em paralelo; devolve IPs que responderam."""
+    if not candidates:
+        return []
+
+    alive: list[str] = []
+    alive_lock = threading.Lock()
+    next_index = 0
+    index_lock = threading.Lock()
+
+    def worker() -> None:
+        nonlocal next_index
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                return
+            with index_lock:
+                index = next_index
+                next_index += 1
+            if index >= len(candidates):
+                return
+            ip = candidates[index]
+            if send_arp(ip, src_ip):
+                with alive_lock:
+                    alive.append(ip)
+
+    workers = min(max_workers, len(candidates))
+    threads = [
+        threading.Thread(target=worker, daemon=True, name=f"nm-arp-{i}") for i in range(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return alive
+
+
+def parse_tailscale_status_peers(payload: dict) -> list[tuple[str, str]]:
+    """Extrai (ip, nome) dos peers em ``tailscale status --json`` (sem Self)."""
+    results: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    peers = payload.get("Peer") or {}
+    if not isinstance(peers, dict):
+        return results
+
+    for peer in peers.values():
+        if not isinstance(peer, dict):
+            continue
+        ips = peer.get("TailscaleIPs") or []
+        if not isinstance(ips, list) or not ips:
+            continue
+        ip = str(ips[0])
+        if not is_tailscale_ip(ip) or ip in seen:
+            continue
+        host = str(peer.get("HostName") or "").strip()
+        dns = str(peer.get("DNSName") or "").strip().rstrip(".")
+        name = host or (dns.split(".")[0] if dns else "") or ip
+        seen.add(ip)
+        results.append((ip, name))
+    return results
+
+
+def list_tailscale_status_peers() -> list[tuple[str, str]]:
+    """Chama ``tailscale status --json``; lista vazia se CLI indisponível."""
+    try:
+        result = hidden_run(
+            ["tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            return []
+        return parse_tailscale_status_peers(payload)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
+        logging.debug("Tailscale status indisponível", exc_info=True)
+        return []
+
+
+def parse_wg_show_dump_peers(text: str, local_ips: set[str] | None = None) -> list[str]:
+    """Extrai IPs /32 de peers a partir de ``wg show all dump``."""
+    local = set(local_ips or ())
+    results: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        # Interface: 5 campos; peer: ≥8 (allowed-ips no índice 4).
+        if len(parts) == 5:
+            continue
+        if len(parts) < 8:
+            continue
+        allowed = parts[4]
+        for token in allowed.split(","):
+            token = token.strip()
+            if not token or "/" not in token:
+                continue
+            try:
+                network = ipaddress.ip_network(token, strict=False)
+            except ValueError:
+                continue
+            if network.version != 4 or network.prefixlen != 32:
+                continue
+            ip = str(network.network_address)
+            if ip in local or ip in seen:
+                continue
+            seen.add(ip)
+            results.append(ip)
+    return results
+
+
+def list_wireguard_peer_ips(local_ips: list[str] | set[str] | None = None) -> list[str]:
+    """Peers WireGuard via ``wg show all dump``; vazio se ``wg`` não existir."""
+    try:
+        result = hidden_run(
+            ["wg", "show", "all", "dump"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+        return parse_wg_show_dump_peers(result.stdout, set(local_ips or ()))
+    except (OSError, subprocess.SubprocessError):
+        logging.debug("wg show indisponível", exc_info=True)
+        return []
 
 
 def _normalize_mac(mac: str) -> str:

@@ -45,6 +45,11 @@ void test_adapter_id_and_default_enabled() {
 void test_subnet_prefix_24() {
     NM_CHECK_EQ(nm::subnet_prefix_24("26.0.0.42"), std::string("26.0.0.0/24"));
     NM_CHECK_EQ(nm::subnet_prefix_24("192.168.1.50"), std::string("192.168.1.0/24"));
+    NM_CHECK_EQ(nm::scan_subnet_prefix("10.0.0.5", 16), std::string("10.0.0.0/24"));
+    NM_CHECK_EQ(nm::scan_subnet_prefix("10.0.0.5", 23), std::string("10.0.0.0/23"));
+    NM_CHECK(nm::mask_to_prefixlen("255.255.255.0") == 24);
+    NM_CHECK(nm::mask_to_prefixlen("255.255.254.0") == 23);
+    NM_CHECK(nm::effective_scan_prefixlen(16) == 24);
 }
 
 void test_skip_ips_for_network() {
@@ -63,14 +68,17 @@ void test_parse_ipconfig_interfaces() {
         "Ethernet adapter Ethernet:\n"
         "\n"
         "   IPv4 Address. . . . . . . . . . . : 192.168.1.10\n"
+        "   Subnet Mask . . . . . . . . . . . : 255.255.255.0\n"
         "\n"
         "Wireless LAN adapter Wi-Fi:\n"
         "\n"
         "   IPv4 Address. . . . . . . . . . . : 10.0.0.5\n"
+        "   Subnet Mask . . . . . . . . . . . : 255.255.254.0\n"
         "\n"
         "Ethernet adapter Radmin VPN:\n"
         "\n"
         "   IPv4 Address. . . . . . . . . . . : 26.0.0.8\n"
+        "   Subnet Mask . . . . . . . . . . . : 255.0.0.0\n"
         "\n"
         "Ethernet adapter Tailscale:\n"
         "\n"
@@ -92,10 +100,13 @@ void test_parse_ipconfig_interfaces() {
     NM_CHECK(ifaces.size() == 5);
     NM_CHECK(ifaces[0].ip == "192.168.1.10");
     NM_CHECK(ifaces[0].network_type == "lan");
+    NM_CHECK(ifaces[0].prefixlen == 24);
     NM_CHECK(ifaces[1].ip == "10.0.0.5");
     NM_CHECK(ifaces[1].network_type == "lan");
+    NM_CHECK(ifaces[1].prefixlen == 23);
     NM_CHECK(ifaces[2].ip == "26.0.0.8");
     NM_CHECK(ifaces[2].network_type == "radmin");
+    NM_CHECK(ifaces[2].prefixlen == 8);
     NM_CHECK(ifaces[3].ip == "100.64.1.20");
     NM_CHECK(ifaces[3].network_type == "tailscale");
     NM_CHECK(ifaces[4].ip == "10.8.0.2");
@@ -142,6 +153,22 @@ void test_unique_scan_ips() {
     NM_CHECK(unique[1] == "10.0.0.5");
 }
 
+void test_parse_tailscale_and_wg() {
+    const std::string ts =
+        R"({"Self":{"TailscaleIPs":["100.64.1.1"]},"Peer":{"k":{"HostName":"nb","DNSName":"nb.ts.net.","TailscaleIPs":["100.101.50.2"]}}})";
+    const auto peers = nm::parse_tailscale_status_peers(ts);
+    NM_CHECK(peers.size() == 1);
+    NM_CHECK(peers[0].first == "100.101.50.2");
+    NM_CHECK(peers[0].second == "nb");
+
+    const std::string dump =
+        "wg0\tpriv\tpub\t51820\toff\n"
+        "wg0\tpeerpub\t(none)\t1.2.3.4:51820\t10.8.0.2/32,192.168.1.0/24\t123\t1\t2\t0\n";
+    const auto wg = nm::parse_wg_show_dump_peers(dump, {"10.8.0.1"});
+    NM_CHECK(wg.size() == 1);
+    NM_CHECK(wg[0] == "10.8.0.2");
+}
+
 void test_format_local_interfaces() {
     const std::vector<nm::LocalInterface> ifaces{
         {"Radmin VPN", "26.0.0.8", "radmin"},
@@ -165,5 +192,6 @@ void run_network_tests() {
     test_parse_arp_neighbors();
     test_radmin_neighbor_ips_from_arp();
     test_unique_scan_ips();
+    test_parse_tailscale_and_wg();
     test_format_local_interfaces();
 }

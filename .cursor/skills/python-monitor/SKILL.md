@@ -58,21 +58,24 @@ Tipos conhecidos: `lan` | `radmin` | `tailscale` | `wireguard`.
 
 Constantes / helpers em `nm/network.py`:
 
-- `list_local_interfaces()` / `parse_ipconfig_interfaces()` — enumera adaptadores
+- `list_local_interfaces()` / `parse_ipconfig_interfaces()` — enumera adaptadores + máscara (`prefixlen`)
 - `monitored_adapters` em `peers.json` + `is_adapter_monitored` / `get_monitored_ips`
 - Default: só `lan` monitorado; VPNs opt-in no painel
-- `unique_scan_ips()` — um representante por `/24`
-- Sub-rede sempre `/24` (`subnet_for_ip`)
+- `unique_scan_ips()` / `scan_subnet_for_ip()` — um representante por sub-rede efetiva
+- Máscara real do adaptador; redes amplas (`prefixlen < 22`) limitadas a `/24` no scan
 
-Scan / auto-discover: percorre apenas adaptadores **monitorados** (exceto `--scan-lan` / `--scan-all`).
-- LAN / Tailscale / WireGuard: varredura ICMP `/24`
-- **Radmin**: consulta a tabela ARP (`arp -a`) na interface `26.*` e confirma com ping — a VPN usa `/8`, então scan `/24` não encontra peers típicos
+Scan / auto-discover (`discover_network_peers`): percorre adaptadores **monitorados** (exceto `--scan-lan` / `--scan-all`).
+- **LAN**: varredura ARP ativa (`SendARP`) na sub-rede; host L2 = ativo (sem exigir ICMP)
+- **Radmin**: tabela ARP (`arp -a`) + confirmação ICMP (`/8`)
+- **Tailscale**: `tailscale status --json` (não varre `/24` do CGNAT)
+- **WireGuard**: `wg show all dump` quando disponível; senão ARP na sub-rede do túnel
+- Monitoramento contínuo dos peers conhecidos permanece via ICMP
 
 ## Ciclo de monitor (`nm.monitor.run_monitor_loop`)
 
 1. Por rede `enabled`: `process_network`
 2. Auto-discover se `auto_discover` e `scan_interval_seconds` (ou lista vazia)
-3. `discover_peers`: 32 workers, timeout 800ms + hostname
+3. `discover_network_peers` (estratégia por tipo) + hostname
 4. `check_peers` nos **visíveis**: 16 workers; toast só em **transição** e se não `muted`
 5. Atualiza `history.json` (abre/fecha segmentos) + prune pela retenção
 6. `save_state`

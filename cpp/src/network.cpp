@@ -1,6 +1,7 @@
 #include "network.hpp"
 
 #include "ping.hpp"
+#include "nlohmann_json.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -8,6 +9,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <iphlpapi.h>
 
 #include <atomic>
 #include <algorithm>
@@ -94,6 +96,59 @@ bool is_adapter_monitored(
     const LocalInterface& iface,
     const std::unordered_map<std::string, bool>& monitored_adapters) {
     return is_adapter_monitored(iface.id(), monitored_adapters, iface.network_type);
+}
+
+int mask_to_prefixlen(const std::string& mask) {
+    unsigned a = 0, b = 0, c = 0, d = 0;
+    if (std::sscanf(mask.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+        return kDefaultPrefixlen;
+    }
+    const unsigned value = (a << 24) | (b << 16) | (c << 8) | d;
+    if (value == 0) {
+        return 0;
+    }
+    // Conta bits 1 contíguos a partir do MSB.
+    int prefix = 0;
+    unsigned bit = 0x80000000u;
+    while (bit && (value & bit)) {
+        ++prefix;
+        bit >>= 1;
+    }
+    // Máscara inválida (buracos) → default.
+    unsigned expected = prefix == 0 ? 0u : (0xFFFFFFFFu << (32 - prefix));
+    if (value != expected) {
+        return kDefaultPrefixlen;
+    }
+    return prefix;
+}
+
+int effective_scan_prefixlen(int prefixlen) {
+    int plen = prefixlen;
+    if (plen < 0) {
+        plen = 0;
+    }
+    if (plen > 32) {
+        plen = 32;
+    }
+    if (plen < kMinScanPrefixlen) {
+        return kDefaultPrefixlen;
+    }
+    return plen;
+}
+
+bool send_arp(const std::string& dest_ip, const std::string& src_ip) {
+    // SendARP espera IPAddr no formato de inet_addr (bytes de rede em DWORD LE).
+    auto to_ipaddr = [](const std::string& ip) -> ULONG {
+        unsigned a = 0, b = 0, c = 0, d = 0;
+        if (std::sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+            return 0;
+        }
+        return (static_cast<ULONG>(d) << 24) | (static_cast<ULONG>(c) << 16) |
+               (static_cast<ULONG>(b) << 8) | static_cast<ULONG>(a);
+    };
+    ULONG mac[2]{};
+    ULONG mac_len = 6;
+    return SendARP(to_ipaddr(dest_ip), to_ipaddr(src_ip), mac, &mac_len) == NO_ERROR;
 }
 
 namespace {
@@ -309,10 +364,44 @@ std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text) {
     std::string current_adapter;
     std::vector<LocalInterface> results;
     std::set<std::string> seen_ips;
-    static const std::regex re(R"(IPv4[^:]*:\s*([\d.]+))", std::regex::icase);
+    std::string pending_ip;
+    int pending_prefix = kDefaultPrefixlen;
+    static const std::regex re_ip(R"(IPv4[^:]*:\s*([\d.]+))", std::regex::icase);
+    static const std::regex re_mask(
+        R"((?:Subnet Mask|M[aá]scara(?: de Sub-rede)?)\s*(?:\.|\s)*:\s*([\d.]+))",
+        std::regex::icase);
+
+    auto flush_pending = [&]() {
+        if (pending_ip.empty() || current_adapter.empty()) {
+            pending_ip.clear();
+            pending_prefix = kDefaultPrefixlen;
+            return;
+        }
+        if (seen_ips.count(pending_ip) || pending_ip.rfind("169.254.", 0) == 0) {
+            pending_ip.clear();
+            pending_prefix = kDefaultPrefixlen;
+            return;
+        }
+        const auto network_type = classify_adapter(current_adapter, pending_ip);
+        if (!network_type) {
+            pending_ip.clear();
+            pending_prefix = kDefaultPrefixlen;
+            return;
+        }
+        LocalInterface iface;
+        iface.name = current_adapter;
+        iface.ip = pending_ip;
+        iface.network_type = *network_type;
+        iface.prefixlen = pending_prefix;
+        seen_ips.insert(pending_ip);
+        results.push_back(std::move(iface));
+        pending_ip.clear();
+        pending_prefix = kDefaultPrefixlen;
+    };
 
     while (std::getline(stream, line)) {
         if (!line.empty() && line[0] != ' ' && line[0] != '\t') {
+            flush_pending();
             current_adapter = line;
             while (!current_adapter.empty() &&
                    (current_adapter.back() == '\r' || current_adapter.back() == ':')) {
@@ -324,26 +413,18 @@ std::vector<LocalInterface> parse_ipconfig_interfaces(const std::string& text) {
             continue;
         }
         std::smatch match;
-        if (!std::regex_search(line, match, re)) {
+        if (!pending_ip.empty() && std::regex_search(line, match, re_mask)) {
+            pending_prefix = mask_to_prefixlen(match[1].str());
             continue;
         }
-        const std::string candidate = match[1].str();
-        if (candidate.rfind("169.254.", 0) == 0 || seen_ips.count(candidate)) {
+        if (!std::regex_search(line, match, re_ip)) {
             continue;
         }
-
-        const auto network_type = classify_adapter(current_adapter, candidate);
-        if (!network_type) {
-            continue;
-        }
-
-        LocalInterface iface;
-        iface.name = current_adapter;
-        iface.ip = candidate;
-        iface.network_type = *network_type;
-        seen_ips.insert(candidate);
-        results.push_back(std::move(iface));
+        flush_pending();
+        pending_ip = match[1].str();
+        pending_prefix = kDefaultPrefixlen;
     }
+    flush_pending();
     return results;
 }
 
@@ -359,7 +440,8 @@ std::vector<LocalInterface> list_local_interfaces() {
             }
         }
         if (!found) {
-            interfaces.insert(interfaces.begin(), LocalInterface{"Radmin VPN", radmin_ip, "radmin"});
+            interfaces.insert(
+                interfaces.begin(), LocalInterface{"Radmin VPN", radmin_ip, "radmin", 8});
         }
     }
     return interfaces;
@@ -484,16 +566,40 @@ std::string format_local_interfaces(const std::vector<LocalInterface>& interface
 
 std::string format_local_interfaces() { return format_local_interfaces(list_local_interfaces()); }
 
-std::string subnet_prefix_24(const std::string& ip) {
-    const unsigned base = ip_to_u32(ip) & 0xFFFFFF00u;
-    return u32_to_ip(base) + "/24";
+int prefixlen_for_local_ip(const std::string& ip) {
+    for (const auto& iface : list_local_interfaces()) {
+        if (iface.ip == ip) {
+            return iface.prefixlen;
+        }
+    }
+    return kDefaultPrefixlen;
 }
+
+std::string subnet_prefix(const std::string& ip, int prefixlen) {
+    int use = prefixlen;
+    if (use < 0) {
+        use = kDefaultPrefixlen;
+    }
+    if (use > 32) {
+        use = 32;
+    }
+    const unsigned host = ip_to_u32(ip);
+    const unsigned mask = use == 0 ? 0u : (0xFFFFFFFFu << (32 - use));
+    return u32_to_ip(host & mask) + "/" + std::to_string(use);
+}
+
+std::string scan_subnet_prefix(const std::string& ip, int prefixlen) {
+    const int raw = prefixlen < 0 ? prefixlen_for_local_ip(ip) : prefixlen;
+    return subnet_prefix(ip, effective_scan_prefixlen(raw));
+}
+
+std::string subnet_prefix_24(const std::string& ip) { return subnet_prefix(ip, 24); }
 
 std::vector<std::string> unique_scan_ips(const std::vector<std::string>& local_ips) {
     std::vector<std::string> result;
     std::set<std::string> seen_subnets;
     for (const auto& ip : local_ips) {
-        const std::string key = subnet_prefix_24(ip);
+        const std::string key = scan_subnet_prefix(ip);
         if (seen_subnets.count(key)) {
             continue;
         }
@@ -509,10 +615,76 @@ std::set<std::string> skip_ips_for_network(const std::string& network_type, cons
         skipped.insert("26.0.0.1");
         skipped.insert("26.255.255.255");
     } else {
-        const unsigned gateway = (ip_to_u32(local_ip) & 0xFFFFFF00u) + 1;
-        skipped.insert(u32_to_ip(gateway));
+        const std::string subnet = scan_subnet_prefix(local_ip);
+        const auto slash = subnet.find('/');
+        const unsigned base = ip_to_u32(slash == std::string::npos ? local_ip : subnet.substr(0, slash));
+        skipped.insert(u32_to_ip(base + 1));
     }
     return skipped;
+}
+
+std::vector<std::string> subnet_host_candidates(
+    const std::string& local_ip,
+    const std::set<std::string>& excluded,
+    int prefixlen) {
+    const int raw = prefixlen < 0 ? prefixlen_for_local_ip(local_ip) : prefixlen;
+    const int plen = effective_scan_prefixlen(raw);
+    const unsigned host = ip_to_u32(local_ip);
+    const unsigned mask = plen == 0 ? 0u : (0xFFFFFFFFu << (32 - plen));
+    const unsigned base = host & mask;
+    const unsigned host_bits = 32u - static_cast<unsigned>(plen);
+    const unsigned max_host = host_bits >= 32 ? 0xFFFFFFFFu : ((1u << host_bits) - 1u);
+
+    std::vector<std::string> candidates;
+    if (max_host < 2) {
+        return candidates;
+    }
+    candidates.reserve(static_cast<size_t>(max_host - 1));
+    for (unsigned offset = 1; offset < max_host; ++offset) {
+        const std::string ip = u32_to_ip(base + offset);
+        if (ip == local_ip || excluded.count(ip)) {
+            continue;
+        }
+        candidates.push_back(ip);
+    }
+    return candidates;
+}
+
+std::vector<std::string> arp_probe_hosts(
+    const std::vector<std::string>& candidates,
+    const std::string& src_ip,
+    const std::atomic_bool* stop) {
+    if (candidates.empty()) {
+        return {};
+    }
+    std::vector<std::string> alive;
+    std::mutex mutex;
+    std::atomic<size_t> next{0};
+    const unsigned workers = 64;
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (unsigned i = 0; i < workers; ++i) {
+        threads.emplace_back([&]() {
+            while (true) {
+                if (stop != nullptr && stop->load()) {
+                    break;
+                }
+                const size_t index = next.fetch_add(1);
+                if (index >= candidates.size()) {
+                    break;
+                }
+                const std::string& ip = candidates[index];
+                if (send_arp(ip, src_ip)) {
+                    std::lock_guard lock(mutex);
+                    alive.push_back(ip);
+                }
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    return alive;
 }
 
 std::string run_arp() {
@@ -669,16 +841,10 @@ std::vector<Peer> discover_peers(
     const std::set<std::string>& known_ips,
     const std::set<std::string>& skip_ips,
     const std::atomic_bool* stop) {
-    const unsigned base = ip_to_u32(local_ip) & 0xFFFFFF00u;
-    std::vector<std::string> candidates;
-    candidates.reserve(254);
-    for (unsigned host = 1; host <= 254; ++host) {
-        const std::string ip = u32_to_ip(base + host);
-        if (known_ips.count(ip) || skip_ips.count(ip) || ip == local_ip) {
-            continue;
-        }
-        candidates.push_back(ip);
-    }
+    std::set<std::string> excluded = known_ips;
+    excluded.insert(skip_ips.begin(), skip_ips.end());
+    excluded.insert(local_ip);
+    const auto candidates = subnet_host_candidates(local_ip, excluded);
 
     std::vector<Peer> discovered;
     std::mutex mutex;
@@ -718,6 +884,34 @@ std::vector<Peer> discover_peers(
     }
     for (auto& thread : threads) {
         thread.join();
+    }
+    return discovered;
+}
+
+std::vector<Peer> discover_lan_peers(
+    const std::string& local_ip,
+    const std::set<std::string>& known_ips,
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop) {
+    std::set<std::string> excluded = known_ips;
+    excluded.insert(skip_ips.begin(), skip_ips.end());
+    excluded.insert(local_ip);
+    const auto candidates = subnet_host_candidates(local_ip, excluded);
+    const auto alive = arp_probe_hosts(candidates, local_ip, stop);
+
+    std::vector<Peer> discovered;
+    for (const auto& ip : alive) {
+        if (stop != nullptr && stop->load()) {
+            break;
+        }
+        if (known_ips.count(ip)) {
+            continue;
+        }
+        Peer peer;
+        peer.ip = ip;
+        const std::string name = resolve_hostname(ip);
+        peer.name = name.empty() ? ip : name;
+        discovered.push_back(std::move(peer));
     }
     return discovered;
 }
@@ -763,6 +957,283 @@ std::vector<Peer> discover_radmin_peers(
         discovered.push_back(std::move(peer));
     }
     return discovered;
+}
+
+std::string run_command_capture(const std::wstring& command) {
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE read_pipe = nullptr;
+    HANDLE write_pipe = nullptr;
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
+        return {};
+    }
+    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi{};
+    std::wstring mutable_cmd = command;
+    if (!CreateProcessW(
+            nullptr, mutable_cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(write_pipe);
+        CloseHandle(read_pipe);
+        return {};
+    }
+    CloseHandle(write_pipe);
+
+    std::string output;
+    char buffer[1024];
+    DWORD read = 0;
+    while (ReadFile(read_pipe, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+        output.append(buffer, buffer + read);
+    }
+    WaitForSingleObject(pi.hProcess, 15000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(read_pipe);
+    return output;
+}
+
+std::vector<std::pair<std::string, std::string>> parse_tailscale_status_peers(const std::string& json_text) {
+    std::vector<std::pair<std::string, std::string>> results;
+    try {
+        const auto payload = nlohmann::json::parse(json_text);
+        if (!payload.contains("Peer") || !payload["Peer"].is_object()) {
+            return results;
+        }
+        std::set<std::string> seen;
+        for (auto it = payload["Peer"].begin(); it != payload["Peer"].end(); ++it) {
+            const auto& peer = it.value();
+            if (!peer.is_object() || !peer.contains("TailscaleIPs") || !peer["TailscaleIPs"].is_array()) {
+                continue;
+            }
+            if (peer["TailscaleIPs"].empty()) {
+                continue;
+            }
+            const std::string ip = peer["TailscaleIPs"][0].get<std::string>();
+            if (!is_tailscale_ip(ip) || seen.count(ip)) {
+                continue;
+            }
+            std::string host = peer.value("HostName", "");
+            std::string dns = peer.value("DNSName", "");
+            while (!dns.empty() && dns.back() == '.') {
+                dns.pop_back();
+            }
+            std::string name = host;
+            if (name.empty() && !dns.empty()) {
+                const auto dot = dns.find('.');
+                name = dot == std::string::npos ? dns : dns.substr(0, dot);
+            }
+            if (name.empty()) {
+                name = ip;
+            }
+            seen.insert(ip);
+            results.emplace_back(ip, name);
+        }
+    } catch (...) {
+        return {};
+    }
+    return results;
+}
+
+std::vector<std::pair<std::string, std::string>> list_tailscale_status_peers() {
+    const std::string output = run_command_capture(L"tailscale status --json");
+    if (output.empty()) {
+        return {};
+    }
+    return parse_tailscale_status_peers(output);
+}
+
+std::vector<std::string> parse_wg_show_dump_peers(
+    const std::string& text,
+    const std::set<std::string>& local_ips) {
+    std::vector<std::string> results;
+    std::set<std::string> seen;
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        std::vector<std::string> parts;
+        std::string part;
+        std::istringstream row(line);
+        while (std::getline(row, part, '\t')) {
+            parts.push_back(part);
+        }
+        if (parts.size() == 5 || parts.size() < 8) {
+            continue;
+        }
+        std::istringstream allowed(parts[4]);
+        std::string token;
+        while (std::getline(allowed, token, ',')) {
+            while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) {
+                token.erase(token.begin());
+            }
+            while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
+                token.pop_back();
+            }
+            const auto slash = token.find('/');
+            if (slash == std::string::npos) {
+                continue;
+            }
+            int plen = 0;
+            try {
+                plen = std::stoi(token.substr(slash + 1));
+            } catch (...) {
+                continue;
+            }
+            if (plen != 32) {
+                continue;
+            }
+            const std::string ip = token.substr(0, slash);
+            unsigned a = 0, b = 0, c = 0, d = 0;
+            if (std::sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+                continue;
+            }
+            if (local_ips.count(ip) || seen.count(ip)) {
+                continue;
+            }
+            seen.insert(ip);
+            results.push_back(ip);
+        }
+    }
+    return results;
+}
+
+std::vector<std::string> list_wireguard_peer_ips(const std::vector<std::string>& local_ips) {
+    const std::string output = run_command_capture(L"wg show all dump");
+    if (output.empty()) {
+        return {};
+    }
+    return parse_wg_show_dump_peers(output, std::set<std::string>(local_ips.begin(), local_ips.end()));
+}
+
+std::vector<Peer> discover_tailscale_peers(
+    const std::set<std::string>& known_ips,
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop) {
+    if (stop != nullptr && stop->load()) {
+        return {};
+    }
+    const auto status_peers = list_tailscale_status_peers();
+    std::vector<Peer> discovered;
+    for (const auto& [ip, name] : status_peers) {
+        if (stop != nullptr && stop->load()) {
+            break;
+        }
+        if (known_ips.count(ip) || skip_ips.count(ip)) {
+            continue;
+        }
+        Peer peer;
+        peer.ip = ip;
+        peer.name = name.empty() ? ip : name;
+        discovered.push_back(std::move(peer));
+    }
+    return discovered;
+}
+
+std::vector<Peer> discover_wireguard_peers(
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& known_ips,
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop) {
+    std::set<std::string> skipped = skip_ips;
+    for (const auto& local_ip : local_ips) {
+        const auto extra = skip_ips_for_network("wireguard", local_ip);
+        skipped.insert(extra.begin(), extra.end());
+    }
+
+    const auto wg_ips = list_wireguard_peer_ips(local_ips);
+    if (!wg_ips.empty()) {
+        std::vector<Peer> discovered;
+        for (const auto& ip : wg_ips) {
+            if (stop != nullptr && stop->load()) {
+                break;
+            }
+            if (known_ips.count(ip) || skipped.count(ip)) {
+                continue;
+            }
+            if (!ping_host(ip, 800)) {
+                continue;
+            }
+            Peer peer;
+            peer.ip = ip;
+            const std::string name = resolve_hostname(ip);
+            peer.name = name.empty() ? ip : name;
+            discovered.push_back(std::move(peer));
+        }
+        return discovered;
+    }
+
+    std::vector<Peer> found;
+    std::set<std::string> known = known_ips;
+    for (const auto& local_ip : local_ips) {
+        if (stop != nullptr && stop->load()) {
+            break;
+        }
+        auto discovered = discover_lan_peers(local_ip, known, skipped, stop);
+        for (auto& peer : discovered) {
+            known.insert(peer.ip);
+            found.push_back(std::move(peer));
+        }
+    }
+    return found;
+}
+
+std::vector<Peer> discover_network_peers(
+    const std::string& network_type,
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& known_ips,
+    const std::atomic_bool* stop) {
+    if (local_ips.empty() && network_type != "tailscale") {
+        return {};
+    }
+
+    if (network_type == "radmin") {
+        std::set<std::string> skipped;
+        for (const auto& local_ip : local_ips) {
+            const auto extra = skip_ips_for_network("radmin", local_ip);
+            skipped.insert(extra.begin(), extra.end());
+        }
+        return discover_radmin_peers(local_ips, known_ips, skipped, stop);
+    }
+    if (network_type == "tailscale") {
+        std::set<std::string> skipped;
+        for (const auto& local_ip : local_ips) {
+            const auto extra = skip_ips_for_network("tailscale", local_ip);
+            skipped.insert(extra.begin(), extra.end());
+            skipped.insert(local_ip);
+        }
+        return discover_tailscale_peers(known_ips, skipped, stop);
+    }
+    if (network_type == "wireguard") {
+        return discover_wireguard_peers(local_ips, known_ips, {}, stop);
+    }
+
+    std::vector<Peer> found;
+    std::set<std::string> known = known_ips;
+    for (const auto& local_ip : unique_scan_ips(local_ips)) {
+        if (stop != nullptr && stop->load()) {
+            break;
+        }
+        auto discovered =
+            discover_lan_peers(local_ip, known, skip_ips_for_network(network_type, local_ip), stop);
+        for (auto& peer : discovered) {
+            known.insert(peer.ip);
+            found.push_back(std::move(peer));
+        }
+    }
+    return found;
 }
 
 }  // namespace nm

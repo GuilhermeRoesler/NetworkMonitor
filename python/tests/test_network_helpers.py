@@ -56,6 +56,18 @@ def test_subnet_for_ip() -> None:
     assert isinstance(net, ipaddress.IPv4Network)
     assert str(net) == "26.0.0.0/24"
     assert "26.0.0.1" in [str(h) for h in net.hosts()]
+    assert str(network.subnet_for_ip("10.0.0.5", 16)) == "10.0.0.0/16"
+    assert str(network.scan_subnet_for_ip("10.0.0.5", 16)) == "10.0.0.0/24"
+    assert str(network.scan_subnet_for_ip("10.0.0.5", 23)) == "10.0.0.0/23"
+
+
+def test_mask_to_prefixlen_and_effective() -> None:
+    assert network.mask_to_prefixlen("255.255.255.0") == 24
+    assert network.mask_to_prefixlen("255.255.0.0") == 16
+    assert network.mask_to_prefixlen("bogus") == 24
+    assert network.effective_scan_prefixlen(16) == 24
+    assert network.effective_scan_prefixlen(22) == 22
+    assert network.effective_scan_prefixlen(24) == 24
 
 
 def test_skip_ips_for_network_radmin() -> None:
@@ -115,14 +127,17 @@ def test_parse_ipconfig_interfaces_multiple_lan() -> None:
 Ethernet adapter Ethernet:
 
    IPv4 Address. . . . . . . . . . . : 192.168.1.10
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
 
 Wireless LAN adapter Wi-Fi:
 
    IPv4 Address. . . . . . . . . . . : 10.0.0.5
+   Subnet Mask . . . . . . . . . . . : 255.255.254.0
 
 Ethernet adapter Radmin VPN:
 
    IPv4 Address. . . . . . . . . . . : 26.0.0.8
+   Subnet Mask . . . . . . . . . . . : 255.0.0.0
 
 Ethernet adapter Tailscale:
 
@@ -131,6 +146,7 @@ Ethernet adapter Tailscale:
 Ethernet adapter WireGuard Tunnel:
 
    IPv4 Address. . . . . . . . . . . : 10.8.0.2
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
 
 Ethernet adapter vEthernet (Default Switch):
 
@@ -144,8 +160,11 @@ Ethernet adapter Local Area Connection:
     by_ip = {iface.ip: iface for iface in ifaces}
     assert set(by_ip) == {"192.168.1.10", "10.0.0.5", "26.0.0.8", "100.64.1.20", "10.8.0.2"}
     assert by_ip["192.168.1.10"].network_type == "lan"
+    assert by_ip["192.168.1.10"].prefixlen == 24
     assert by_ip["10.0.0.5"].network_type == "lan"
+    assert by_ip["10.0.0.5"].prefixlen == 23
     assert by_ip["26.0.0.8"].network_type == "radmin"
+    assert by_ip["26.0.0.8"].prefixlen == 8
     assert by_ip["100.64.1.20"].network_type == "tailscale"
     assert by_ip["10.8.0.2"].network_type == "wireguard"
 
@@ -189,6 +208,7 @@ def test_parse_ipconfig_interfaces_pt_br() -> None:
 Adaptador Ethernet Ethernet:
 
    Endereço IPv4. . . . . . . . . . . . : 192.168.0.20
+   Máscara de Sub-rede . . . . . . . . : 255.255.255.128
 
 Adaptador de LAN sem fio Wi-Fi:
 
@@ -196,7 +216,39 @@ Adaptador de LAN sem fio Wi-Fi:
 """
     ifaces = network.parse_ipconfig_interfaces(output)
     assert [i.ip for i in ifaces] == ["192.168.0.20", "10.1.1.2"]
+    assert ifaces[0].prefixlen == 25
+    assert ifaces[1].prefixlen == 24
     assert all(i.network_type == "lan" for i in ifaces)
+
+
+def test_parse_tailscale_status_peers() -> None:
+    payload = {
+        "Self": {"TailscaleIPs": ["100.64.1.1"], "HostName": "me"},
+        "Peer": {
+            "key1": {
+                "HostName": "notebook",
+                "DNSName": "notebook.tail123.ts.net.",
+                "TailscaleIPs": ["100.101.50.2", "fd7a::2"],
+            },
+            "key2": {
+                "HostName": "",
+                "DNSName": "phone.tail123.ts.net.",
+                "TailscaleIPs": ["100.90.1.3"],
+            },
+        },
+    }
+    peers = network.parse_tailscale_status_peers(payload)
+    assert peers == [("100.101.50.2", "notebook"), ("100.90.1.3", "phone")]
+
+
+def test_parse_wg_show_dump_peers() -> None:
+    dump = (
+        "wg0\tpriv\tpub\t51820\toff\n"
+        "wg0\tpeerpub\t(none)\t1.2.3.4:51820\t10.8.0.2/32,192.168.1.0/24\t123\t1\t2\t0\n"
+        "wg0\tother\t(none)\t(none)\t10.8.0.3/32\t0\t0\t0\t0\n"
+    )
+    ips = network.parse_wg_show_dump_peers(dump, {"10.8.0.1"})
+    assert ips == ["10.8.0.2", "10.8.0.3"]
 
 
 def test_unique_scan_ips_dedupes_same_slash24() -> None:
