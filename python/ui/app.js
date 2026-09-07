@@ -66,6 +66,7 @@
     btnAddPeerCancel: document.getElementById("btn-add-peer-cancel"),
     btnAddPeerSubmit: document.getElementById("btn-add-peer-submit"),
     btnTips: document.getElementById("btn-tips"),
+    btnUpdate: document.getElementById("btn-update"),
     tipsPanel: document.getElementById("tips-panel"),
     chkNotifications: document.getElementById("chk-notifications"),
     chkHidden: document.getElementById("chk-hidden"),
@@ -1314,6 +1315,67 @@
     }, 900);
   }
 
+
+  function syncUpdateButton(snap) {
+    const btn = els.btnUpdate;
+    if (!btn) {
+      return;
+    }
+    const update = snap && snap.update ? snap.update : null;
+    const available = !!(update && update.available && update.download_url);
+    const applying = !!(update && update.applying);
+    const version = update && update.latest_version ? String(update.latest_version) : "";
+    const label = btn.querySelector(".btn-update-label");
+    if (label) {
+      label.textContent = version ? `Nova versão ${version}` : "Nova versão";
+    }
+    btn.title = version
+      ? `Baixar e instalar a versão ${version}`
+      : "Baixar e instalar a nova versão";
+    btn.classList.toggle("hidden", !available && !applying);
+    btn.hidden = !available && !applying;
+    btn.disabled = applying || !available;
+    btn.classList.toggle("is-busy", applying);
+    if (applying && label) {
+      label.textContent = "Atualizando…";
+    }
+  }
+
+  async function onUpdateClick() {
+    const btn = els.btnUpdate;
+    if (!btn || btn.disabled) {
+      return;
+    }
+    btn.disabled = true;
+    btn.classList.add("is-busy");
+    const label = btn.querySelector(".btn-update-label");
+    if (label) {
+      label.textContent = "Preparando…";
+    }
+    try {
+      const result = await apiCall("start_update");
+      if (!result || !result.ok) {
+        const err = result && result.error ? result.error : "falha ao iniciar atualização";
+        if (label) {
+          label.textContent = "Tentar de novo";
+        }
+        btn.title = err;
+        btn.disabled = false;
+        btn.classList.remove("is-busy");
+        return;
+      }
+      if (label) {
+        label.textContent = "Baixando…";
+      }
+    } catch (err) {
+      if (label) {
+        label.textContent = "Tentar de novo";
+      }
+      btn.disabled = false;
+      btn.classList.remove("is-busy");
+    }
+  }
+
   function applySnapshot(snap) {
     if (!snap || busy) {
       return;
@@ -1526,6 +1588,12 @@
   function setTipsOpen(open) {
     els.tipsPanel.classList.toggle("hidden", !open);
     els.btnTips.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  if (els.btnUpdate) {
+    els.btnUpdate.addEventListener("click", () => {
+      void onUpdateClick();
+    });
   }
 
   els.btnTips.addEventListener("click", (event) => {

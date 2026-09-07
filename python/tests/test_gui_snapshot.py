@@ -117,3 +117,6 @@ def test_build_snapshot_shape(tmp_path, monkeypatch) -> None:
     assert "rtt_ms" in snap["peers"][0]
     assert "last_seen" in snap["peers"][0]
     assert "updated_at" in snap
+    assert "app_version" in snap
+    assert "update" in snap
+    assert "available" in snap["update"]

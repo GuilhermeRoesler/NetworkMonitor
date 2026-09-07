@@ -26,6 +26,8 @@ description: >-
 | `nm/monitor.py` | check_peers, process_network, loop |
 | `nm/tray.py` | bandeja pystray |
 | `nm/startup.py` | atalho Startup |
+| `nm/version.py` / `nm/updater.py` | versão (VERSION) + check GitHub Releases |
+| `python/scripts/apply_update.ps1` | download + kill (timeout 10s) + setup |
 | `nm/win32_ui.py` | AppUserModelID, ícones HWND |
 | `nm/cli.py` | argparse e modos de execução |
 
@@ -115,6 +117,7 @@ Em `nm.config` / `nm.state` / `nm.history` / `nm.network` / `nm.identity`:
 | Item de menu tray | `nm/tray.py` |
 | Flag CLI | `nm/cli.py` |
 | Build exe | `python/build.py` |
+| Auto-update | `nm/updater.py` + `scripts/apply_update.ps1` + botão no painel |
 | Instalador | `installer/NetworkMonitor.iss` + job CD |
 
 ## Testes

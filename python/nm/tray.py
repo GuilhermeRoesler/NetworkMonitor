@@ -66,6 +66,9 @@ def run_with_tray() -> None:
     from gui import status_window
 
     setup_logging()
+    from nm.updater import start_background_check
+
+    start_background_check()
     stop_event = threading.Event()
 
     monitor_thread = threading.Thread(

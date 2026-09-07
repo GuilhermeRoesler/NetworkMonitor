@@ -12,6 +12,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 PYTHON_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = ROOT_DIR / "assets"
 UI_DIR = PYTHON_DIR / "ui"
+SCRIPTS_DIR = PYTHON_DIR / "scripts"
+VERSION_FILE = ROOT_DIR / "VERSION"
 ICON_ICO = ASSETS_DIR / "icon.ico"
 
 
@@ -29,6 +31,8 @@ def build_args() -> list[str]:
         "--hidden-import=nm.config",
         "--hidden-import=nm.monitor",
         "--hidden-import=nm.tray",
+        "--hidden-import=nm.updater",
+        "--hidden-import=nm.version",
         "--collect-all=winotify",
         "--collect-all=pystray",
         "--collect-all=PIL",
@@ -40,6 +44,10 @@ def build_args() -> list[str]:
         args.append(f"--add-data={ASSETS_DIR}{sep}assets")
     if UI_DIR.is_dir():
         args.append(f"--add-data={UI_DIR}{sep}ui")
+    if SCRIPTS_DIR.is_dir():
+        args.append(f"--add-data={SCRIPTS_DIR}{sep}scripts")
+    if VERSION_FILE.is_file():
+        args.append(f"--add-data={VERSION_FILE}{sep}.")
     if sys.platform == "win32":
         args.append("--windowed")
     return args

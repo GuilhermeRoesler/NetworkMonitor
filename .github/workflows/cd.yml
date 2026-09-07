@@ -44,10 +44,6 @@ jobs:
           pip install -r python/requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
-        working-directory: python
-        run: python build.py
-
       - name: Resolve version
         id: ver
         run: |
@@ -60,6 +56,11 @@ jobs:
           }
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Set-Content -Path VERSION -Value $version -NoNewline -Encoding utf8
+
+      - name: Build executable
+        working-directory: python
+        run: python build.py
 
       - name: Package portable zip
         run: |

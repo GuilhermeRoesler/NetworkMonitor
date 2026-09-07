@@ -316,6 +316,17 @@
       visible_count: visible.length,
       hidden_count,
       updated_at: `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`,
+      app_version: "0.1.0",
+      update: {
+        checking: false,
+        available: true,
+        current_version: "0.1.0",
+        latest_version: "0.2.0",
+        download_url: "https://github.com/GuilhermeRoesler/NetworkMonitor/releases",
+        asset_name: "NetworkMonitor-python-installer-win-x64-v0.2.0.exe",
+        error: "",
+        applying: false,
+      },
     };
   }
 
@@ -345,6 +356,14 @@
   const api = {
     get_snapshot() {
       return buildSnapshot();
+    },
+    get_update_status() {
+      return this.get_snapshot().update;
+    },
+    async start_update() {
+      const update = this.get_snapshot().update;
+      update.applying = true;
+      return { ok: true, ...update };
     },
     refresh_now() {
       return buildSnapshot();

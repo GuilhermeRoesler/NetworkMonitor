@@ -160,6 +160,9 @@ def build_snapshot(*, show_hidden: bool) -> dict:
     hidden_total = len(config.hidden_peers)
     offline_count = max(visible_total - online_count, 0)
 
+    from nm.updater import snapshot_update_status
+    from nm.version import get_app_version
+
     return {
         "radmin_ip": radmin_ip,
         "lan_ip": lan_ip,
@@ -176,6 +179,8 @@ def build_snapshot(*, show_hidden: bool) -> dict:
         "visible_count": visible_total,
         "hidden_count": hidden_total,
         "updated_at": datetime.now().strftime("%H:%M:%S"),
+        "app_version": get_app_version(),
+        "update": snapshot_update_status(),
     }
 
 
@@ -269,6 +274,16 @@ class GuiApi:
         except Exception:
             logging.exception("Falha ao copiar para a área de transferência")
             return False
+
+    def get_update_status(self) -> dict:
+        from nm.updater import snapshot_update_status
+
+        return snapshot_update_status()
+
+    def start_update(self) -> dict:
+        from nm.updater import begin_update
+
+        return begin_update()
 
 
 class StatusWindow:

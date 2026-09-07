@@ -50,9 +50,21 @@
                 <p id="local-ips" class="muted brand-meta">Detectando redes…</p>
               </div>
             </div>
-            <div class="panel-live" title="Monitoramento ativo" aria-live="polite">
-              <span class="live-pulse" aria-hidden="true"></span>
-              <span class="live-label">Ao vivo</span>
+            <div class="panel-titlebar-actions">
+              <button
+                type="button"
+                id="btn-update"
+                class="btn-update hidden"
+                hidden
+                title="Baixar e instalar a nova versão"
+              >
+                <span class="btn-update-dot" aria-hidden="true"></span>
+                <span class="btn-update-label">Nova versão</span>
+              </button>
+              <div class="panel-live" title="Monitoramento ativo" aria-live="polite">
+                <span class="live-pulse" aria-hidden="true"></span>
+                <span class="live-label">Ao vivo</span>
+              </div>
             </div>
           </div>
           <div id="summary-chips" class="panel-meters" aria-live="polite"></div>
