@@ -11,6 +11,7 @@ state.json
 peers.json
 history.json
 monitor.log
+monitor.log.*
 
 # Python packaging / venv
 python/venv/

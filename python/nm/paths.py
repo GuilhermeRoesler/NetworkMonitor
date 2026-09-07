@@ -14,6 +14,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 HISTORY_RETENTION_MIN = 1
 HISTORY_RETENTION_MAX = 90
 HISTORY_RETENTION_DEFAULT = 7
+# Rotação de monitor.log: ao atingir o limite, arquiva e mantém N backups.
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 2
 ICON_PNG_NAME = "icon.png"
 ICON_ICO_NAME = "icon.ico"
 # Sem espaços — Windows agrupa a taskbar por este ID (não pelo python.exe).

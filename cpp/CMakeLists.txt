@@ -52,6 +52,7 @@ add_executable(NetworkMonitorCppTests
   tests/test_network.cpp
   tests/test_config.cpp
   tests/test_win32.cpp
+  tests/test_logging.cpp
 )
 target_include_directories(NetworkMonitorCppTests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/tests"
