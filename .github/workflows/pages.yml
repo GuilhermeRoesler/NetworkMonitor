@@ -5,6 +5,7 @@ on:
     branches: [main, master]
     paths:
       - "python/ui/**"
+      - "docs/screenshots/og.webp"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -33,10 +34,12 @@ jobs:
         run: |
           mkdir -p _site
           cp -a python/ui/. _site/
+          cp docs/screenshots/og.webp _site/og.webp
           test -f _site/index.html
           test -f _site/demo-api.js
           test -f _site/app.js
           test -f _site/app.css
+          test -f _site/og.webp
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

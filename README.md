@@ -6,7 +6,7 @@ Por padrão só a **rede local** é monitorada. No painel, a aba **Adaptadores**
 
 ## Demo do painel
 
-![Painel Network Monitor](docs/screenshots/demo.png)
+![Painel Network Monitor](docs/screenshots/demo.webp)
 
 A UI em `python/ui/` roda no browser com dados fictícios (sem ping real):
 
