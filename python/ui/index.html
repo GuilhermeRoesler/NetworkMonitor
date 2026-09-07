@@ -70,6 +70,15 @@
                 </svg>
                 Atualizar
               </button>
+              <button type="button" id="btn-add-peer" class="btn btn-ghost" title="Adicionar peer manualmente">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M8 1.25a.75.75 0 0 1 .75.75v5.25H14a.75.75 0 0 1 0 1.5H8.75V14a.75.75 0 0 1-1.5 0V8.75H2a.75.75 0 0 1 0-1.5h5.25V2A.75.75 0 0 1 8 1.25z"
+                  />
+                </svg>
+                Adicionar
+              </button>
             </div>
 
             <div class="toolbar-divider" aria-hidden="true"></div>
@@ -251,7 +260,8 @@
                   </div>
                   <p class="empty-title" id="empty-title">Nenhum peer configurado</p>
                   <p class="muted empty-copy" id="empty-copy">
-                    Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.
+                    Use <strong>Adicionar</strong> para incluir um IP (ex.: Radmin), execute um scan
+                    (<code>--scan-all</code>) ou aguarde a descoberta automática.
                   </p>
                 </div>
                 <div class="scroll-fade scroll-fade-top" aria-hidden="true"></div>
@@ -303,6 +313,7 @@
               <p class="tips-title">Atalhos</p>
               <ul class="tips-list">
                 <li><kbd>/</kbd> foca a busca</li>
+                <li><kbd>Adicionar</kbd> inclui peer por IP</li>
                 <li><kbd>Arrastar</kbd> reordena (sem filtro)</li>
                 <li><kbd>Duplo clique</kbd> / <kbd>F2</kbd> renomeia</li>
                 <li><kbd>Delete</kbd> oculta</li>
@@ -316,6 +327,51 @@
     </div>
 
     <div id="context-menu" class="context-menu hidden" role="menu"></div>
+
+    <div id="add-peer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="add-peer-title">
+      <div class="modal-backdrop" data-close-modal="1"></div>
+      <div class="modal-card">
+        <header class="modal-header">
+          <h2 id="add-peer-title" class="modal-title">Adicionar peer</h2>
+          <button type="button" class="modal-close" id="btn-add-peer-close" title="Fechar" aria-label="Fechar">
+            ×
+          </button>
+        </header>
+        <form id="add-peer-form" class="modal-form" autocomplete="off">
+          <label class="modal-field" for="add-peer-ip">
+            <span class="modal-label">IP</span>
+            <input
+              type="text"
+              id="add-peer-ip"
+              name="ip"
+              inputmode="decimal"
+              placeholder="26.x.x.x"
+              spellcheck="false"
+              required
+            />
+          </label>
+          <label class="modal-field" for="add-peer-name">
+            <span class="modal-label">Nome <span class="modal-optional">(opcional)</span></span>
+            <input type="text" id="add-peer-name" name="name" placeholder="Nome do dispositivo" spellcheck="false" />
+          </label>
+          <label class="modal-field" for="add-peer-network">
+            <span class="modal-label">Rede</span>
+            <select id="add-peer-network" name="network_type">
+              <option value="radmin">Radmin VPN</option>
+              <option value="lan">Rede local</option>
+              <option value="tailscale">Tailscale</option>
+              <option value="wireguard">WireGuard</option>
+            </select>
+          </label>
+          <p id="add-peer-error" class="modal-error hidden" role="alert"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btn-add-peer-cancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-add-peer-submit">Adicionar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script src="demo-api.js"></script>
     <script src="vendor/Sortable.min.js"></script>
     <script src="app.js"></script>

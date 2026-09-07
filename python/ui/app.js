@@ -55,6 +55,16 @@
     emptyCopy: document.getElementById("empty-copy"),
     updatedAt: document.getElementById("updated-at"),
     btnRefresh: document.getElementById("btn-refresh"),
+    btnAddPeer: document.getElementById("btn-add-peer"),
+    addPeerModal: document.getElementById("add-peer-modal"),
+    addPeerForm: document.getElementById("add-peer-form"),
+    addPeerIp: document.getElementById("add-peer-ip"),
+    addPeerName: document.getElementById("add-peer-name"),
+    addPeerNetwork: document.getElementById("add-peer-network"),
+    addPeerError: document.getElementById("add-peer-error"),
+    btnAddPeerClose: document.getElementById("btn-add-peer-close"),
+    btnAddPeerCancel: document.getElementById("btn-add-peer-cancel"),
+    btnAddPeerSubmit: document.getElementById("btn-add-peer-submit"),
     btnTips: document.getElementById("btn-tips"),
     tipsPanel: document.getElementById("tips-panel"),
     chkNotifications: document.getElementById("chk-notifications"),
@@ -991,8 +1001,70 @@
     } else {
       els.emptyTitle.textContent = "Nenhum peer configurado";
       els.emptyCopy.innerHTML =
-        "Execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática na rede.";
+        "Use <strong>Adicionar</strong> para incluir um IP (ex.: Radmin), execute um scan (<code>--scan-all</code>) ou aguarde a descoberta automática.";
     }
+  }
+
+  function isAddPeerModalOpen() {
+    return Boolean(els.addPeerModal && !els.addPeerModal.classList.contains("hidden"));
+  }
+
+  function setAddPeerError(message) {
+    if (!els.addPeerError) {
+      return;
+    }
+    const text = String(message || "").trim();
+    els.addPeerError.textContent = text;
+    els.addPeerError.classList.toggle("hidden", !text);
+  }
+
+  function inferNetworkTypeFromIp(ip) {
+    const value = String(ip || "").trim();
+    if (/^26\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value)) {
+      return "radmin";
+    }
+    const parts = value.split(".").map((part) => Number(part));
+    if (parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+      const [a, b] = parts;
+      if (a === 100 && b >= 64 && b <= 127) {
+        return "tailscale";
+      }
+      if (a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) {
+        return "lan";
+      }
+    }
+    return null;
+  }
+
+  function closeAddPeerModal() {
+    if (!els.addPeerModal) {
+      return;
+    }
+    els.addPeerModal.classList.add("hidden");
+    setAddPeerError("");
+    els.addPeerForm?.reset();
+    if (els.addPeerNetwork) {
+      els.addPeerNetwork.value = "radmin";
+    }
+  }
+
+  function openAddPeerModal() {
+    if (!els.addPeerModal) {
+      return;
+    }
+    hideMenu();
+    setTipsOpen(false);
+    closeRetentionDropdown();
+    setAddPeerError("");
+    els.addPeerForm?.reset();
+    if (els.addPeerNetwork) {
+      els.addPeerNetwork.value = "radmin";
+    }
+    els.addPeerModal.classList.remove("hidden");
+    window.setTimeout(() => {
+      els.addPeerIp?.focus();
+      els.addPeerIp?.select();
+    }, 30);
   }
 
   function renderPeers(snap) {
@@ -1477,6 +1549,71 @@
     }
   });
 
+  els.btnAddPeer?.addEventListener("click", () => {
+    openAddPeerModal();
+  });
+
+  els.btnAddPeerClose?.addEventListener("click", () => {
+    closeAddPeerModal();
+  });
+
+  els.btnAddPeerCancel?.addEventListener("click", () => {
+    closeAddPeerModal();
+  });
+
+  els.addPeerModal?.addEventListener("click", (event) => {
+    if (event.target?.dataset?.closeModal) {
+      closeAddPeerModal();
+    }
+  });
+
+  els.addPeerIp?.addEventListener("input", () => {
+    const inferred = inferNetworkTypeFromIp(els.addPeerIp.value);
+    if (inferred && els.addPeerNetwork) {
+      els.addPeerNetwork.value = inferred;
+    }
+  });
+
+  els.addPeerForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!apiReady || busy) {
+      return;
+    }
+    const ip = String(els.addPeerIp?.value || "").trim();
+    const name = String(els.addPeerName?.value || "").trim();
+    const networkType = String(els.addPeerNetwork?.value || "").trim();
+    if (!ip) {
+      setAddPeerError("Informe o IP");
+      els.addPeerIp?.focus();
+      return;
+    }
+    setAddPeerError("");
+    els.btnAddPeerSubmit?.classList.add("is-busy");
+    if (els.btnAddPeerSubmit) {
+      els.btnAddPeerSubmit.disabled = true;
+    }
+    setBusy(true);
+    try {
+      const result = await apiCall("add_peer", ip, name, networkType);
+      if (!result || !result.ok) {
+        setAddPeerError((result && result.error) || "Não foi possível adicionar");
+        els.addPeerIp?.focus();
+        return;
+      }
+      closeAddPeerModal();
+      selectedIp = result.ip || ip;
+      await refreshNow();
+    } catch (err) {
+      setAddPeerError("Falha ao adicionar peer");
+    } finally {
+      setBusy(false);
+      els.btnAddPeerSubmit?.classList.remove("is-busy");
+      if (els.btnAddPeerSubmit) {
+        els.btnAddPeerSubmit.disabled = false;
+      }
+    }
+  });
+
   els.chkNotifications.addEventListener("change", async () => {
     await apiCall("set_notifications", els.chkNotifications.checked);
     await refreshNow();
@@ -1731,9 +1868,16 @@
     if (renameInput) {
       return;
     }
+    if (isAddPeerModalOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeAddPeerModal();
+      }
+      return;
+    }
     const tag = (event.target && event.target.tagName) || "";
     const inField =
-      tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable;
+      tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || event.target?.isContentEditable;
     if (
       !inField &&
       activeView === "peers" &&

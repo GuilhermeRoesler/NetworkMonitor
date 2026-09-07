@@ -95,6 +95,25 @@ def test_update_peer_name(write_sample_config: Path) -> None:
     assert peer["name"] == "Servidor"
 
 
+def test_add_peer_manual(write_sample_config: Path) -> None:
+    result = config.add_peer("26.60.135.10", "PC-Radmin", "radmin")
+    assert result == {"ok": True, "ip": "26.60.135.10", "network_type": "radmin"}
+    raw = json.loads(write_sample_config.read_text(encoding="utf-8"))
+    radmin = next(net for net in raw["networks"] if net["type"] == "radmin")
+    assert radmin["enabled"] is True
+    assert any(p["ip"] == "26.60.135.10" and p["name"] == "PC-Radmin" for p in radmin["peers"])
+    assert "26.60.135.10" in raw["peer_order"]
+
+
+def test_add_peer_infers_type_and_rejects_duplicate(write_sample_config: Path) -> None:
+    assert config.add_peer("26.1.2.3")["ok"] is True
+    dup = config.add_peer("26.1.2.3", "Outro")
+    assert dup["ok"] is False
+    assert "existe" in str(dup.get("error", "")).lower()
+    invalid = config.add_peer("not-an-ip")
+    assert invalid["ok"] is False
+
+
 def test_set_notifications_enabled(write_sample_config: Path) -> None:
     config.set_notifications_enabled(False)
     assert config.notifications_enabled() is False

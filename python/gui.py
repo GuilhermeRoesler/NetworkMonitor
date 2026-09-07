@@ -216,6 +216,12 @@ class GuiApi:
         self._owner.show_hidden = bool(show)
         return True
 
+    def add_peer(self, ip: str, name: str = "", network_type: str = "") -> dict:
+        from nm.config import add_peer
+
+        resolved_type = str(network_type or "").strip() or None
+        return add_peer(str(ip or ""), str(name or ""), resolved_type)
+
     def rename_peer(self, ip: str, name: str) -> bool:
         from nm.config import update_peer_name
 

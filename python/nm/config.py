@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 
@@ -9,9 +10,13 @@ from nm import paths
 from nm.models import MonitorConfig, NetworkConfig, Peer
 from nm.network import (
     DEFAULT_NETWORK_NAMES,
+    KNOWN_NETWORK_TYPES,
     adapter_id,
     default_adapter_enabled,
     is_adapter_monitored,
+    is_private_ip,
+    is_radmin_ip,
+    is_tailscale_ip,
     list_local_interfaces,
 )
 
@@ -361,6 +366,60 @@ def resolve_adapter_key(
     if name and network_type:
         return adapter_id(network_type, name)
     return None
+
+
+def infer_network_type(ip: str) -> str | None:
+    """Infere tipo de rede a partir do IP (Radmin / Tailscale / LAN)."""
+    if is_radmin_ip(ip):
+        return "radmin"
+    if is_tailscale_ip(ip):
+        return "tailscale"
+    if is_private_ip(ip):
+        return "lan"
+    return None
+
+
+def add_peer(
+    ip: str,
+    name: str = "",
+    network_type: str | None = None,
+) -> dict[str, str | bool]:
+    """Adiciona um peer manualmente em peers.json.
+
+    Retorna ``{"ok": True, "ip": ..., "network_type": ...}`` ou
+    ``{"ok": False, "error": "..."}``.
+    """
+    ip = (ip or "").strip()
+    name = (name or "").strip()
+    try:
+        ip = str(ipaddress.IPv4Address(ip))
+    except ipaddress.AddressValueError:
+        return {"ok": False, "error": "IP inválido"}
+
+    requested = (network_type or "").strip().lower() or None
+    if requested is not None and requested not in KNOWN_NETWORK_TYPES:
+        return {"ok": False, "error": "Tipo de rede inválido"}
+
+    resolved = requested or infer_network_type(ip)
+    if resolved is None:
+        return {"ok": False, "error": "Informe o tipo de rede"}
+
+    if not name:
+        name = ip
+
+    with paths.CONFIG_PATH.open(encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    if ip in collect_peer_ips(raw):
+        return {"ok": False, "error": "Peer já existe"}
+
+    bucket = ensure_network_bucket(raw, resolved)
+    bucket["enabled"] = True
+    bucket.setdefault("peers", []).append({"name": name, "ip": ip})
+    normalize_peer_order(raw)
+    paths.CONFIG_PATH.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    logging.info("Peer adicionado: %s (%s) em %s", name, ip, resolved)
+    return {"ok": True, "ip": ip, "network_type": resolved}
 
 
 def update_peer_name(ip: str, new_name: str) -> bool:

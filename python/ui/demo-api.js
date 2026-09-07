@@ -385,6 +385,61 @@
       peer.name = next;
       return true;
     },
+    add_peer(ip, name = "", networkType = "") {
+      const value = String(ip || "").trim();
+      const parts = value.split(".").map((part) => Number(part));
+      const valid =
+        parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255);
+      if (!valid) {
+        return { ok: false, error: "IP inválido" };
+      }
+      if (findPeer(value)) {
+        return { ok: false, error: "Peer já existe" };
+      }
+      let type = String(networkType || "").trim().toLowerCase();
+      if (!type) {
+        if (value.startsWith("26.")) {
+          type = "radmin";
+        } else if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) {
+          type = "tailscale";
+        } else if (
+          parts[0] === 10 ||
+          (parts[0] === 192 && parts[1] === 168) ||
+          (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+        ) {
+          type = "lan";
+        } else {
+          return { ok: false, error: "Informe o tipo de rede" };
+        }
+      }
+      const labels = {
+        lan: "LAN",
+        radmin: "Radmin VPN",
+        tailscale: "Tailscale",
+        wireguard: "WireGuard",
+      };
+      if (!labels[type]) {
+        return { ok: false, error: "Tipo de rede inválido" };
+      }
+      const displayName = String(name || "").trim() || value;
+      peers.push({
+        ip: value,
+        name: displayName,
+        hidden: false,
+        muted: false,
+        network_type: type,
+        network_name: labels[type],
+        online: false,
+        rtt_ms: null,
+        last_seen: null,
+        base_rtt: 20,
+        hostname: null,
+        os_hint: null,
+        vendor: null,
+        mac: null,
+      });
+      return { ok: true, ip: value, network_type: type };
+    },
     set_hidden(ip, hidden) {
       const peer = findPeer(ip);
       if (!peer) {
