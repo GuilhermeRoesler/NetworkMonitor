@@ -66,6 +66,7 @@ Sem `--install`. Help em português.
 - Mesmos defaults e campos JSON (ver skill `config-schema`), incl. `monitored_adapters`
 - Tipos: `lan` / `radmin` / `tailscale` / `wireguard`; default só LAN monitorada
 - Descoberta usa IPs dos adaptadores monitorados (`get_monitored_ips`)
+- Radmin: descoberta via ARP (`arp -a` + ping), não varredura `/24`
 - Transições de estado equivalentes; toast nativo quando UI ativa
 - Painel: rename, ocultar/mostrar, mute, reorder (paridade com `python/gui.py`); seleção de adaptadores via `peers.json` / `set_adapter_monitored`
 

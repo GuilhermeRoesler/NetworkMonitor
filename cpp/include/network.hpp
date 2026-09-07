@@ -55,8 +55,24 @@ std::string subnet_prefix_24(const std::string& ip);
 std::vector<std::string> unique_scan_ips(const std::vector<std::string>& local_ips);
 std::set<std::string> skip_ips_for_network(const std::string& network_type, const std::string& local_ip);
 
+/** Vizinhos por IP de interface a partir do stdout de ``arp -a``. */
+std::unordered_map<std::string, std::vector<std::string>> parse_arp_neighbors(const std::string& text);
+std::vector<std::string> radmin_neighbor_ips_from_arp(
+    const std::string& arp_text,
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& skip_ips = {});
+std::vector<std::string> list_radmin_arp_neighbors(
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& skip_ips = {});
+
 std::vector<Peer> discover_peers(
     const std::string& local_ip,
+    const std::set<std::string>& known_ips,
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop = nullptr);
+
+std::vector<Peer> discover_radmin_peers(
+    const std::vector<std::string>& local_ips,
     const std::set<std::string>& known_ips,
     const std::set<std::string>& skip_ips,
     const std::atomic_bool* stop = nullptr);

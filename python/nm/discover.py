@@ -6,20 +6,18 @@ import logging
 import threading
 
 from nm.models import Peer
-from nm.network import subnet_for_ip
+from nm.network import list_radmin_arp_neighbors, skip_ips_for_network, subnet_for_ip
 from nm.ping import ping_hosts_parallel, resolve_hostname
 
 
-def discover_peers(
-    local_ip: str,
+def _peers_from_ping(
+    candidates: list[str],
     known_ips: set[str],
     *,
-    skip_ips: set[str] | None = None,
     stop_event: threading.Event | None = None,
 ) -> list[Peer]:
-    network = subnet_for_ip(local_ip)
-    excluded = known_ips | {local_ip} | (skip_ips or set())
-    candidates = [str(host) for host in network.hosts() if str(host) not in excluded]
+    if not candidates:
+        return []
 
     ping_results = ping_hosts_parallel(
         candidates,
@@ -39,3 +37,46 @@ def discover_peers(
         logging.info("Peer descoberto: %s (%s)", name, ip)
 
     return discovered
+
+
+def discover_peers(
+    local_ip: str,
+    known_ips: set[str],
+    *,
+    skip_ips: set[str] | None = None,
+    stop_event: threading.Event | None = None,
+) -> list[Peer]:
+    """Varredura ICMP da sub-rede /24 (LAN e VPNs com máscara estreita)."""
+    network = subnet_for_ip(local_ip)
+    excluded = known_ips | {local_ip} | (skip_ips or set())
+    candidates = [str(host) for host in network.hosts() if str(host) not in excluded]
+    return _peers_from_ping(candidates, known_ips, stop_event=stop_event)
+
+
+def discover_radmin_peers(
+    local_ips: list[str],
+    known_ips: set[str],
+    *,
+    skip_ips: set[str] | None = None,
+    stop_event: threading.Event | None = None,
+) -> list[Peer]:
+    """Descoberta Radmin via tabela ARP (rede /8; scan /24 não cobre os peers)."""
+    if not local_ips:
+        return []
+
+    skipped: set[str] = set(skip_ips or ())
+    for local_ip in local_ips:
+        skipped |= skip_ips_for_network("radmin", local_ip)
+
+    excluded = known_ips | skipped
+    candidates = [
+        ip
+        for ip in list_radmin_arp_neighbors(local_ips, skip_ips=skipped)
+        if ip not in excluded
+    ]
+    logging.info(
+        "Radmin: %d candidato(s) no ARP (%s)",
+        len(candidates),
+        ", ".join(local_ips),
+    )
+    return _peers_from_ping(candidates, known_ips, stop_event=stop_event)

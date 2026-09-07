@@ -51,6 +51,7 @@ void test_skip_ips_for_network() {
     const auto radmin = nm::skip_ips_for_network("radmin", "26.0.0.10");
     NM_CHECK(radmin.count("26.0.0.10") == 1);
     NM_CHECK(radmin.count("26.0.0.1") == 1);
+    NM_CHECK(radmin.count("26.255.255.255") == 1);
 
     const auto lan = nm::skip_ips_for_network("lan", "192.168.1.50");
     NM_CHECK(lan.count("192.168.1.50") == 1);
@@ -101,6 +102,38 @@ void test_parse_ipconfig_interfaces() {
     NM_CHECK(ifaces[4].network_type == "wireguard");
 }
 
+void test_parse_arp_neighbors() {
+    const std::string output =
+        "Interface: 192.168.1.10 --- 0xd\n"
+        "  192.168.1.1           aa-bb-cc-dd-ee-ff     dynamic\n"
+        "Interface: 26.60.135.186 --- 0x8\n"
+        "  26.0.0.1              02-00-00-00-51-00     dinamico\n"
+        "  26.249.169.69         02-50-a4-27-56-08     dinamico\n"
+        "  26.255.255.255        ff-ff-ff-ff-ff-ff     static\n"
+        "  26.60.135.10          00-00-00-00-00-00     invalid\n";
+
+    const auto by_iface = nm::parse_arp_neighbors(output);
+    NM_CHECK(by_iface.at("26.60.135.186").size() == 2);
+    NM_CHECK(by_iface.at("26.60.135.186")[0] == "26.0.0.1");
+    NM_CHECK(by_iface.at("26.60.135.186")[1] == "26.249.169.69");
+    NM_CHECK(by_iface.at("192.168.1.10").size() == 1);
+}
+
+void test_radmin_neighbor_ips_from_arp() {
+    const std::string output =
+        "Interface: 26.60.135.186 --- 0x8\n"
+        "  26.0.0.1              02-00-00-00-51-00     dynamic\n"
+        "  26.249.169.69         02-50-a4-27-56-08     dynamic\n"
+        "  26.12.1.2             aa-bb-cc-dd-ee-01     dynamic\n"
+        "Interface: 192.168.1.10 --- 0xd\n"
+        "  192.168.1.1           aa-bb-cc-dd-ee-ff     dynamic\n";
+
+    const auto ips = nm::radmin_neighbor_ips_from_arp(output, {"26.60.135.186"});
+    NM_CHECK(ips.size() == 2);
+    NM_CHECK(ips[0] == "26.249.169.69");
+    NM_CHECK(ips[1] == "26.12.1.2");
+}
+
 void test_unique_scan_ips() {
     const std::vector<std::string> ips{"192.168.1.10", "192.168.1.20", "10.0.0.5"};
     const auto unique = nm::unique_scan_ips(ips);
@@ -129,6 +162,8 @@ void run_network_tests() {
     test_subnet_prefix_24();
     test_skip_ips_for_network();
     test_parse_ipconfig_interfaces();
+    test_parse_arp_neighbors();
+    test_radmin_neighbor_ips_from_arp();
     test_unique_scan_ips();
     test_format_local_interfaces();
 }

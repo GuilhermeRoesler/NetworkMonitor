@@ -18,6 +18,18 @@ RADMIN_REG_PATHS = (
 )
 
 RADMIN_GATEWAYS = {"26.0.0.1"}
+RADMIN_BROADCAST = "26.255.255.255"
+ARP_SKIP_MACS = frozenset(
+    {
+        "00-00-00-00-00-00",
+        "ff-ff-ff-ff-ff-ff",
+    }
+)
+_ARP_IFACE_RE = re.compile(r"^\s*Interface:\s*([\d.]+)", re.IGNORECASE)
+_ARP_ENTRY_RE = re.compile(
+    r"^\s*(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{2}(?:[-:][0-9a-fA-F]{2}){5})\s+(\S+)",
+    re.IGNORECASE,
+)
 LAN_SKIP_PREFIXES = ("169.254.",)  # APIPA / link-local
 ADAPTER_SKIP_TOKENS = (
     "loopback",
@@ -366,7 +378,110 @@ def skip_ips_for_network(network_type: str, local_ip: str) -> set[str]:
     skipped = {local_ip}
     if network_type == "radmin":
         skipped |= RADMIN_GATEWAYS
+        skipped.add(RADMIN_BROADCAST)
     else:
         network = subnet_for_ip(local_ip)
         skipped.add(str(network.network_address + 1))
     return skipped
+
+
+def _normalize_mac(mac: str) -> str:
+    return mac.replace(":", "-").lower()
+
+
+def parse_arp_neighbors(text: str) -> dict[str, list[str]]:
+    """Extrai vizinhos IPv4 do stdout de ``arp -a`` (PT/EN), por IP da interface."""
+    current_iface = ""
+    by_iface: dict[str, list[str]] = {}
+    seen_by_iface: dict[str, set[str]] = {}
+
+    for line in text.splitlines():
+        iface_match = _ARP_IFACE_RE.match(line.strip())
+        if iface_match:
+            current_iface = iface_match.group(1)
+            by_iface.setdefault(current_iface, [])
+            seen_by_iface.setdefault(current_iface, set())
+            continue
+
+        if not current_iface:
+            continue
+
+        entry = _ARP_ENTRY_RE.match(line)
+        if not entry:
+            continue
+
+        ip, mac, entry_type = entry.group(1), entry.group(2), entry.group(3)
+        mac_norm = _normalize_mac(mac)
+        type_lower = entry_type.lower()
+        if mac_norm in ARP_SKIP_MACS:
+            continue
+        if "invalid" in type_lower or "incomplet" in type_lower or "inval" in type_lower:
+            continue
+
+        seen = seen_by_iface[current_iface]
+        if ip in seen:
+            continue
+        seen.add(ip)
+        by_iface[current_iface].append(ip)
+
+    return by_iface
+
+
+def radmin_neighbor_ips_from_arp(
+    arp_text: str,
+    local_ips: list[str] | set[str],
+    *,
+    skip_ips: set[str] | None = None,
+) -> list[str]:
+    """IPs Radmin vistos no ARP das interfaces locais (fora de gateway/broadcast)."""
+    local_set = set(local_ips)
+    skipped = set(skip_ips or ())
+    skipped |= local_set
+    skipped |= RADMIN_GATEWAYS
+    skipped.add(RADMIN_BROADCAST)
+
+    by_iface = parse_arp_neighbors(arp_text)
+    results: list[str] = []
+    seen: set[str] = set()
+
+    def _consider(ip: str) -> None:
+        if not is_radmin_ip(ip) or ip in skipped or ip in seen:
+            return
+        seen.add(ip)
+        results.append(ip)
+
+    for iface_ip in local_set:
+        for neighbor in by_iface.get(iface_ip, []):
+            _consider(neighbor)
+
+    # Fallback: seções sem match exato (ex.: IP local mudou) — qualquer 26.* no ARP.
+    if not results:
+        for neighbors in by_iface.values():
+            for neighbor in neighbors:
+                _consider(neighbor)
+
+    return results
+
+
+def _run_arp() -> str:
+    result = hidden_run(
+        ["arp", "-a"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    return result.stdout
+
+
+def list_radmin_arp_neighbors(
+    local_ips: list[str] | set[str],
+    *,
+    skip_ips: set[str] | None = None,
+) -> list[str]:
+    """Lê ``arp -a`` e devolve candidatos Radmin nas interfaces indicadas."""
+    try:
+        return radmin_neighbor_ips_from_arp(_run_arp(), local_ips, skip_ips=skip_ips)
+    except (subprocess.SubprocessError, OSError):
+        return []

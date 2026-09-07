@@ -9,7 +9,7 @@ import sys
 import threading
 
 from nm.config import ensure_network_bucket, load_config, persist_discovered_peers
-from nm.discover import discover_peers
+from nm.discover import discover_peers, discover_radmin_peers
 from nm.logging_setup import setup_logging
 from nm.monitor import run_monitor_loop
 from nm.network import (
@@ -68,7 +68,10 @@ def scan_network(network_type: str, *, monitored_only: bool = True) -> bool:
 
     scan_ips = unique_scan_ips(local_ips)
     print(f"IP(s) local(is) ({label}): {', '.join(local_ips)}")
-    print(f"Escaneando sub-rede(s) {', '.join(str(subnet_for_ip(ip)) for ip in scan_ips)}...")
+    if network_type == "radmin":
+        print("Consultando vizinhos Radmin via ARP...")
+    else:
+        print(f"Escaneando sub-rede(s) {', '.join(str(subnet_for_ip(ip)) for ip in scan_ips)}...")
 
     network = next(
         (n for n in config.networks if n.network_type == network_type and n.enabled),
@@ -98,23 +101,36 @@ def scan_network(network_type: str, *, monitored_only: bool = True) -> bool:
 
     known_ips = {peer.ip for peer in config.all_peers} | set(local_ips)
     discovered_all = []
-    for local_ip in scan_ips:
-        discovered = discover_peers(
-            local_ip,
-            known_ips,
-            skip_ips=skip_ips_for_network(network_type, local_ip),
-        )
+    if network_type == "radmin":
+        skipped: set[str] = set()
+        for local_ip in local_ips:
+            skipped |= skip_ips_for_network("radmin", local_ip)
+        discovered = discover_radmin_peers(local_ips, known_ips, skip_ips=skipped)
         for peer in discovered:
             peer.network_name = network.name
             peer.network_type = network_type
             known_ips.add(peer.ip)
         discovered_all.extend(discovered)
+    else:
+        for local_ip in scan_ips:
+            discovered = discover_peers(
+                local_ip,
+                known_ips,
+                skip_ips=skip_ips_for_network(network_type, local_ip),
+            )
+            for peer in discovered:
+                peer.network_name = network.name
+                peer.network_type = network_type
+                known_ips.add(peer.ip)
+            discovered_all.extend(discovered)
 
     if discovered_all:
         persist_discovered_peers(network.name, discovered_all)
         print(f"\n{len(discovered_all)} peer(s) encontrado(s) em '{network.name}':")
         for peer in discovered_all:
             print(f"  - {peer.name} ({peer.ip})")
+    elif network_type == "radmin":
+        print("\nNenhum peer Radmin online encontrado no ARP (é preciso tráfego recente na VPN).")
     else:
         print(f"\nNenhum peer online encontrado na(s) sub-rede(s) {label}.")
     return True

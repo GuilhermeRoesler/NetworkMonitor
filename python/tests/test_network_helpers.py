@@ -62,6 +62,45 @@ def test_skip_ips_for_network_radmin() -> None:
     skipped = network.skip_ips_for_network("radmin", "26.0.0.10")
     assert "26.0.0.10" in skipped
     assert "26.0.0.1" in skipped
+    assert "26.255.255.255" in skipped
+
+
+def test_parse_arp_neighbors_pt_br() -> None:
+    output = """
+Interface: 192.168.1.10 --- 0xd
+  192.168.1.1           aa-bb-cc-dd-ee-ff     dinâmico
+Interface: 26.60.135.186 --- 0x8
+  26.0.0.1              02-00-00-00-51-00     dinâmico
+  26.249.169.69         02-50-a4-27-56-08     dinâmico
+  26.255.255.255        ff-ff-ff-ff-ff-ff     estático
+  26.60.135.10          00-00-00-00-00-00     inválido
+"""
+    by_iface = network.parse_arp_neighbors(output)
+    assert by_iface["26.60.135.186"] == ["26.0.0.1", "26.249.169.69"]
+    assert "192.168.1.1" in by_iface["192.168.1.10"]
+
+
+def test_radmin_neighbor_ips_from_arp() -> None:
+    output = """
+Interface: 26.60.135.186 --- 0x8
+  26.0.0.1              02-00-00-00-51-00     dynamic
+  26.249.169.69         02-50-a4-27-56-08     dynamic
+  26.12.1.2             aa-bb-cc-dd-ee-01     dynamic
+Interface: 192.168.1.10 --- 0xd
+  192.168.1.1           aa-bb-cc-dd-ee-ff     dynamic
+"""
+    ips = network.radmin_neighbor_ips_from_arp(output, ["26.60.135.186"])
+    assert ips == ["26.249.169.69", "26.12.1.2"]
+
+
+def test_radmin_neighbor_ips_from_arp_fallback() -> None:
+    output = """
+Interface: 26.1.2.3 --- 0x8
+  26.249.169.69         02-50-a4-27-56-08     dynamic
+"""
+    # IP local no config diferente do da seção ARP → fallback varre 26.*.
+    ips = network.radmin_neighbor_ips_from_arp(output, ["26.60.135.186"])
+    assert ips == ["26.249.169.69"]
 
 
 def test_skip_ips_for_network_lan() -> None:

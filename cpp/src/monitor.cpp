@@ -149,25 +149,46 @@ void run_monitor_loop(std::atomic_bool& stop, MonitorEventSink* sink) {
                     known_global.insert(local_ip);
                 }
                 std::vector<Peer> discovered_all;
-                for (const auto& local_ip : scan_ips) {
-                    if (stop.load()) {
-                        break;
-                    }
-                    auto discovered = discover_peers(
-                        local_ip,
-                        known_global,
-                        skip_ips_for_network(network.network_type, local_ip),
-                        &stop);
-                    for (auto& peer : discovered) {
-                        peer.network_name = network.name;
-                        peer.network_type = network.network_type;
-                        emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
-                        if (sink != nullptr) {
-                            sink->on_peer_discovered(PeerDiscoveredEvent{peer});
+                if (network.network_type == "radmin") {
+                    if (!stop.load()) {
+                        std::set<std::string> skipped;
+                        for (const auto& local_ip : local_ips) {
+                            const auto extra = skip_ips_for_network("radmin", local_ip);
+                            skipped.insert(extra.begin(), extra.end());
                         }
-                        known_global.insert(peer.ip);
+                        auto discovered = discover_radmin_peers(local_ips, known_global, skipped, &stop);
+                        for (auto& peer : discovered) {
+                            peer.network_name = network.name;
+                            peer.network_type = network.network_type;
+                            emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
+                            if (sink != nullptr) {
+                                sink->on_peer_discovered(PeerDiscoveredEvent{peer});
+                            }
+                            known_global.insert(peer.ip);
+                        }
+                        discovered_all = std::move(discovered);
                     }
-                    discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+                } else {
+                    for (const auto& local_ip : scan_ips) {
+                        if (stop.load()) {
+                            break;
+                        }
+                        auto discovered = discover_peers(
+                            local_ip,
+                            known_global,
+                            skip_ips_for_network(network.network_type, local_ip),
+                            &stop);
+                        for (auto& peer : discovered) {
+                            peer.network_name = network.name;
+                            peer.network_type = network.network_type;
+                            emit_log(sink, "Peer descoberto: " + peer.name + " (" + peer.ip + ")");
+                            if (sink != nullptr) {
+                                sink->on_peer_discovered(PeerDiscoveredEvent{peer});
+                            }
+                            known_global.insert(peer.ip);
+                        }
+                        discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+                    }
                 }
                 if (!discovered_all.empty()) {
                     persist_discovered_peers(network.name, discovered_all);
@@ -271,14 +292,18 @@ bool scan_network(const std::string& network_type, bool monitored_only) {
         }
         std::cout << local_ips[i];
     }
-    std::cout << "\nEscaneando sub-rede(s) ";
-    for (size_t i = 0; i < scan_ips.size(); ++i) {
-        if (i > 0) {
-            std::cout << ", ";
+    if (network_type == "radmin") {
+        std::cout << "\nConsultando vizinhos Radmin via ARP...\n";
+    } else {
+        std::cout << "\nEscaneando sub-rede(s) ";
+        for (size_t i = 0; i < scan_ips.size(); ++i) {
+            if (i > 0) {
+                std::cout << ", ";
+            }
+            std::cout << subnet_prefix_24(scan_ips[i]);
         }
-        std::cout << subnet_prefix_24(scan_ips[i]);
+        std::cout << "...\n";
     }
-    std::cout << "...\n";
 
     const NetworkConfig* network = nullptr;
     for (const auto& candidate : config.networks) {
@@ -311,14 +336,28 @@ bool scan_network(const std::string& network_type, bool monitored_only) {
     }
 
     std::vector<Peer> discovered_all;
-    for (const auto& local_ip : scan_ips) {
-        auto discovered = discover_peers(local_ip, known, skip_ips_for_network(network_type, local_ip));
-        for (auto& peer : discovered) {
+    if (network_type == "radmin") {
+        std::set<std::string> skipped;
+        for (const auto& local_ip : local_ips) {
+            const auto extra = skip_ips_for_network("radmin", local_ip);
+            skipped.insert(extra.begin(), extra.end());
+        }
+        discovered_all = discover_radmin_peers(local_ips, known, skipped);
+        for (auto& peer : discovered_all) {
             peer.network_name = network->name;
             peer.network_type = network_type;
             known.insert(peer.ip);
         }
-        discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+    } else {
+        for (const auto& local_ip : scan_ips) {
+            auto discovered = discover_peers(local_ip, known, skip_ips_for_network(network_type, local_ip));
+            for (auto& peer : discovered) {
+                peer.network_name = network->name;
+                peer.network_type = network_type;
+                known.insert(peer.ip);
+            }
+            discovered_all.insert(discovered_all.end(), discovered.begin(), discovered.end());
+        }
     }
 
     if (!discovered_all.empty()) {
@@ -327,6 +366,8 @@ bool scan_network(const std::string& network_type, bool monitored_only) {
         for (const auto& peer : discovered_all) {
             std::cout << "  - " << peer.name << " (" << peer.ip << ")\n";
         }
+    } else if (network_type == "radmin") {
+        std::cout << "\nNenhum peer Radmin online encontrado no ARP (é preciso tráfego recente na VPN).\n";
     } else {
         std::cout << "\nNenhum peer online encontrado na(s) sub-rede(s) " << label << ".\n";
     }

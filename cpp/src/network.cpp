@@ -507,11 +507,161 @@ std::set<std::string> skip_ips_for_network(const std::string& network_type, cons
     std::set<std::string> skipped{local_ip};
     if (network_type == "radmin") {
         skipped.insert("26.0.0.1");
+        skipped.insert("26.255.255.255");
     } else {
         const unsigned gateway = (ip_to_u32(local_ip) & 0xFFFFFF00u) + 1;
         skipped.insert(u32_to_ip(gateway));
     }
     return skipped;
+}
+
+std::string run_arp() {
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE read_pipe = nullptr;
+    HANDLE write_pipe = nullptr;
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
+        return {};
+    }
+    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi{};
+    wchar_t cmd[] = L"arp -a";
+    if (!CreateProcessW(nullptr, cmd, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(write_pipe);
+        CloseHandle(read_pipe);
+        return {};
+    }
+    CloseHandle(write_pipe);
+
+    std::string output;
+    char buffer[1024];
+    DWORD read = 0;
+    while (ReadFile(read_pipe, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+        output.append(buffer, buffer + read);
+    }
+    WaitForSingleObject(pi.hProcess, 10000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(read_pipe);
+    return output;
+}
+
+std::string normalize_mac(std::string mac) {
+    for (char& c : mac) {
+        if (c == ':') {
+            c = '-';
+        }
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    }
+    return mac;
+}
+
+bool is_skipped_arp_mac(const std::string& mac) {
+    return mac == "00-00-00-00-00-00" || mac == "ff-ff-ff-ff-ff-ff";
+}
+
+std::unordered_map<std::string, std::vector<std::string>> parse_arp_neighbors(const std::string& text) {
+    std::unordered_map<std::string, std::vector<std::string>> by_iface;
+    std::unordered_map<std::string, std::set<std::string>> seen_by_iface;
+    std::string current_iface;
+    const std::regex iface_re(R"(^\s*Interface:\s*([\d.]+))", std::regex::icase);
+    const std::regex entry_re(
+        R"(^\s*(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{2}(?:[-:][0-9a-fA-F]{2}){5})\s+(\S+))",
+        std::regex::icase);
+
+    std::istringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        std::smatch match;
+        if (std::regex_search(line, match, iface_re)) {
+            current_iface = match[1].str();
+            by_iface.emplace(current_iface, std::vector<std::string>{});
+            seen_by_iface.emplace(current_iface, std::set<std::string>{});
+            continue;
+        }
+        if (current_iface.empty() || !std::regex_search(line, match, entry_re)) {
+            continue;
+        }
+        const std::string ip = match[1].str();
+        const std::string mac = normalize_mac(match[2].str());
+        const std::string type_lower = to_lower(match[3].str());
+        if (is_skipped_arp_mac(mac)) {
+            continue;
+        }
+        if (type_lower.find("invalid") != std::string::npos ||
+            type_lower.find("incomplet") != std::string::npos ||
+            type_lower.find("inval") != std::string::npos) {
+            continue;
+        }
+        auto& seen = seen_by_iface[current_iface];
+        if (seen.count(ip)) {
+            continue;
+        }
+        seen.insert(ip);
+        by_iface[current_iface].push_back(ip);
+    }
+    return by_iface;
+}
+
+std::vector<std::string> radmin_neighbor_ips_from_arp(
+    const std::string& arp_text,
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& skip_ips) {
+    std::set<std::string> local_set(local_ips.begin(), local_ips.end());
+    std::set<std::string> skipped = skip_ips;
+    skipped.insert(local_set.begin(), local_set.end());
+    skipped.insert("26.0.0.1");
+    skipped.insert("26.255.255.255");
+
+    const auto by_iface = parse_arp_neighbors(arp_text);
+    std::vector<std::string> results;
+    std::set<std::string> seen;
+
+    auto consider = [&](const std::string& ip) {
+        if (!is_radmin_ip(ip) || skipped.count(ip) || seen.count(ip)) {
+            return;
+        }
+        seen.insert(ip);
+        results.push_back(ip);
+    };
+
+    for (const auto& iface_ip : local_set) {
+        const auto it = by_iface.find(iface_ip);
+        if (it == by_iface.end()) {
+            continue;
+        }
+        for (const auto& neighbor : it->second) {
+            consider(neighbor);
+        }
+    }
+
+    if (results.empty()) {
+        for (const auto& [iface_ip, neighbors] : by_iface) {
+            (void)iface_ip;
+            for (const auto& neighbor : neighbors) {
+                consider(neighbor);
+            }
+        }
+    }
+    return results;
+}
+
+std::vector<std::string> list_radmin_arp_neighbors(
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& skip_ips) {
+    return radmin_neighbor_ips_from_arp(run_arp(), local_ips, skip_ips);
 }
 
 std::vector<Peer> discover_peers(
@@ -568,6 +718,49 @@ std::vector<Peer> discover_peers(
     }
     for (auto& thread : threads) {
         thread.join();
+    }
+    return discovered;
+}
+
+std::vector<Peer> discover_radmin_peers(
+    const std::vector<std::string>& local_ips,
+    const std::set<std::string>& known_ips,
+    const std::set<std::string>& skip_ips,
+    const std::atomic_bool* stop) {
+    if (local_ips.empty()) {
+        return {};
+    }
+
+    std::set<std::string> skipped = skip_ips;
+    for (const auto& local_ip : local_ips) {
+        const auto extra = skip_ips_for_network("radmin", local_ip);
+        skipped.insert(extra.begin(), extra.end());
+    }
+
+    std::vector<std::string> candidates;
+    for (const auto& ip : list_radmin_arp_neighbors(local_ips, skipped)) {
+        if (known_ips.count(ip) || skipped.count(ip)) {
+            continue;
+        }
+        candidates.push_back(ip);
+    }
+
+    std::vector<Peer> discovered;
+    for (const auto& ip : candidates) {
+        if (stop != nullptr && stop->load()) {
+            break;
+        }
+        if (!ping_host(ip, 800)) {
+            continue;
+        }
+        if (known_ips.count(ip)) {
+            continue;
+        }
+        Peer peer;
+        peer.ip = ip;
+        const std::string name = resolve_hostname(ip);
+        peer.name = name.empty() ? ip : name;
+        discovered.push_back(std::move(peer));
     }
     return discovered;
 }

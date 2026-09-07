@@ -7,7 +7,7 @@ import threading
 import time
 
 from nm.config import load_config, persist_discovered_peers
-from nm.discover import discover_peers
+from nm.discover import discover_peers, discover_radmin_peers
 from nm.history import load_history, prune_history, save_history, update_history_from_states
 from nm.identity import enrich_online_peers, record_peer_ping
 from nm.models import MonitorConfig, NetworkConfig, Peer
@@ -127,6 +127,24 @@ def process_network(
 
     def _discover_all() -> list[Peer]:
         found: list[Peer] = []
+        if network.network_type == "radmin":
+            if stop_event is not None and stop_event.is_set():
+                return found
+            skipped: set[str] = set()
+            for local_ip in local_ips:
+                skipped |= skip_ips_for_network("radmin", local_ip)
+            discovered = discover_radmin_peers(
+                local_ips,
+                known_ips,
+                skip_ips=skipped,
+                stop_event=stop_event,
+            )
+            for peer in discovered:
+                peer.network_name = network.name
+                peer.network_type = network.network_type
+                known_ips.add(peer.ip)
+            return discovered
+
         for local_ip in scan_ips:
             if stop_event is not None and stop_event.is_set():
                 break
@@ -158,11 +176,18 @@ def process_network(
             return peers, last_scan, config_changed
         if stop_event is not None and stop_event.is_set():
             return peers, last_scan, config_changed
-        logging.info(
-            "Rede '%s' sem peers. Escaneando %s...",
-            network.name,
-            ", ".join(str(subnet_for_ip(ip)) for ip in scan_ips),
-        )
+        if network.network_type == "radmin":
+            logging.info(
+                "Rede '%s' sem peers. Consultando ARP Radmin (%s)...",
+                network.name,
+                ", ".join(local_ips),
+            )
+        else:
+            logging.info(
+                "Rede '%s' sem peers. Escaneando %s...",
+                network.name,
+                ", ".join(str(subnet_for_ip(ip)) for ip in scan_ips),
+            )
         discovered = _discover_all()
         if discovered:
             persist_discovered_peers(network.name, discovered)

@@ -63,6 +63,8 @@ Constantes / helpers em `nm/network.py`:
 - Sub-rede sempre `/24` (`subnet_for_ip`)
 
 Scan / auto-discover: percorre apenas adaptadores **monitorados** (exceto `--scan-lan` / `--scan-all`).
+- LAN / Tailscale / WireGuard: varredura ICMP `/24`
+- **Radmin**: consulta a tabela ARP (`arp -a`) na interface `26.*` e confirma com ping — a VPN usa `/8`, então scan `/24` não encontra peers típicos
 
 ## Ciclo de monitor (`nm.monitor.run_monitor_loop`)
 
