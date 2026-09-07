@@ -39,6 +39,7 @@ _status: dict[str, Any] = {
     "applying": False,
 }
 _check_started = False
+_notified_version = ""
 
 
 def parse_version(raw: str) -> tuple[int, ...]:
@@ -109,6 +110,24 @@ def _set_status(**kwargs: Any) -> None:
         _status.update(kwargs)
 
 
+def _notify_update_available(latest: str, current: str) -> None:
+    """Toast de sistema uma vez por versão detectada nesta sessão."""
+    global _notified_version
+    with _lock:
+        if not latest or _notified_version == latest:
+            return
+        _notified_version = latest
+    try:
+        from nm.notify import notify
+
+        notify(
+            title="Atualização disponível",
+            message=f"Versão {latest} pronta (atual: {current}). Abra o painel para atualizar.",
+        )
+    except Exception:
+        logging.debug("Falha ao notificar atualização disponível", exc_info=True)
+
+
 def check_for_update(*, force: bool = False) -> dict[str, Any]:
     """Consulta a release mais recente. Seguro para chamar de thread."""
     current = get_app_version()
@@ -146,6 +165,8 @@ def check_for_update(*, force: bool = False) -> dict[str, Any]:
             asset_name=asset["name"] if available else "",
             error="",
         )
+        if available:
+            _notify_update_available(latest, current)
     except (
         urllib.error.URLError,
         urllib.error.HTTPError,
@@ -184,11 +205,14 @@ def start_background_check() -> None:
         if _check_started:
             return
         _check_started = True
+        # Marca checking antes da thread para a UI refletir progresso.
+        # A thread precisa de force=True: sem isso check_for_update retorna
+        # cedo ao ver checking já True e a consulta ao GitHub nunca roda.
         _status["checking"] = True
         _status["current_version"] = get_app_version()
 
     thread = threading.Thread(
-        target=check_for_update,
+        target=lambda: check_for_update(force=True),
         name="nm-update-check",
         daemon=True,
     )
